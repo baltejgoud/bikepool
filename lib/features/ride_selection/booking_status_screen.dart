@@ -494,10 +494,21 @@ class _StatusCard extends StatelessWidget {
                   highContrast: highContrast,
                 ),
           borderRadius: BorderRadius.circular(AppRadii.lg),
+          boxShadow: AppColors.softElevation(
+            isDark: isDark,
+            highContrast: highContrast,
+            tint: highlighted ? AppColors.primary : null,
+            strength: 0.9,
+          ),
           border: Border.all(
             color: highlighted
-                ? AppColors.primary.withValues(alpha: 0.18)
-                : AppColors.outline(
+                ? AppColors.softStroke(
+                    isDark: isDark,
+                    highContrast: highContrast,
+                    tint: AppColors.primary,
+                    strength: 1.1,
+                  )
+                : AppColors.softStroke(
                     isDark: isDark,
                     highContrast: highContrast,
                   ),

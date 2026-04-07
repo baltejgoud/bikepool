@@ -4,7 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 
+import '../../core/models/lat_lng_point.dart';
+import '../../core/providers/maps_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../shared/widgets/app_back_button.dart';
@@ -35,6 +38,15 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
   late Animation<double> _sheetAnimation;
   bool _isBooking = false;
 
+  // Real route data
+  List<LatLng> _routePoints = [];
+  LatLng? _pickupLoc;
+  LatLng? _dropOffLoc;
+  String _distanceText = '...';
+  String _durationText = '...';
+  double _distanceKm = 0;
+  bool _routeLoaded = false;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +59,51 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
       curve: Curves.easeOutCubic,
     );
     _sheetController.forward();
+    _fetchRoute();
+  }
+
+  Future<void> _fetchRoute() async {
+    // Get user's current location as pickup
+    LatLng pickupLoc;
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      pickupLoc = LatLng(position.latitude, position.longitude);
+    } catch (_) {
+      // Fallback to destination area
+      pickupLoc = LatLng(widget.destinationLat - 0.01, widget.destinationLng - 0.01);
+    }
+
+    final dropOff = LatLng(widget.destinationLat, widget.destinationLng);
+
+    // Fetch real directions
+    final mapsService = ref.read(googleMapsServiceProvider);
+    final route = await mapsService.getDirections(
+      origin: LatLngPoint(lat: pickupLoc.latitude, lng: pickupLoc.longitude),
+      destination: LatLngPoint(lat: dropOff.latitude, lng: dropOff.longitude),
+    );
+
+    if (mounted) {
+      setState(() {
+        _pickupLoc = pickupLoc;
+        _dropOffLoc = dropOff;
+        if (route != null) {
+          _routePoints = route.polylinePoints
+              .map((p) => LatLng(p.lat, p.lng))
+              .toList();
+          _distanceText = route.distanceText;
+          _durationText = route.durationText;
+          _distanceKm = route.distanceMeters / 1000.0;
+        } else {
+          // Fallback straight line
+          _routePoints = [pickupLoc, dropOff];
+          _distanceText = '~${(const Distance().as(LengthUnit.Kilometer, pickupLoc, dropOff)).toStringAsFixed(1)} km';
+          _durationText = 'Est.';
+        }
+        _routeLoaded = true;
+      });
+    }
   }
 
   @override
@@ -57,12 +114,10 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Simulated variables for the flow
-    const driverLoc = LatLng(37.7749, -122.4194);
-    const pickupLoc = LatLng(37.7849, -122.4094);
-    const dropOffLoc = LatLng(37.7949, -122.4294);
-    const distanceKm = 4.2;
-    const isOffRoute = true; // Simulated: off-route drop-off
+    final pickupLoc = _pickupLoc ?? LatLng(widget.destinationLat - 0.01, widget.destinationLng);
+    final dropOffLoc = _dropOffLoc ?? LatLng(widget.destinationLat, widget.destinationLng);
+    final distanceKm = _distanceKm;
+    const isOffRoute = false;
 
     final mediaQuery = MediaQuery.of(context);
     final theme = Theme.of(context);
@@ -87,7 +142,7 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
             hint: 'Shows the driver location, pickup point, and destination.',
             child: ExcludeSemantics(
               child: FlutterMap(
-                options: const MapOptions(
+                options: MapOptions(
                   initialCenter: pickupLoc,
                   initialZoom: 13.0,
                 ),
@@ -102,7 +157,9 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
                   PolylineLayer(
                     polylines: [
                       Polyline(
-                        points: [driverLoc, pickupLoc, dropOffLoc],
+                        points: _routeLoaded && _routePoints.isNotEmpty
+                            ? _routePoints
+                            : [pickupLoc, dropOffLoc],
                         color: AppColors.primary,
                         strokeWidth: highContrast ? 6 : 5,
                       ),
@@ -110,31 +167,11 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
                   ),
                   MarkerLayer(
                     markers: [
-                      // Driver Marker
-                      Marker(
-                        point: driverLoc,
-                        width: 40,
-                        height: 40,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.blueAccent,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                          child: Icon(
-                            widget.ride.type == VehicleType.bike
-                                ? Icons.motorcycle
-                                : Icons.directions_car,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                      ),
-                      // Pickup Marker
+                      // Driver/Pickup Marker
                       Marker(
                         point: pickupLoc,
-                        width: 32,
-                        height: 32,
+                        width: 40,
+                        height: 40,
                         child: Container(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
@@ -144,10 +181,11 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
                           child: const Icon(
                             Icons.person,
                             color: Colors.white,
-                            size: 18,
+                            size: 20,
                           ),
                         ),
                       ),
+
                       // Drop-off Marker
                       Marker(
                         point: dropOffLoc,
@@ -201,7 +239,9 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      'Pickup in 3 min → 12 min ride → $distanceKm km',
+                      _routeLoaded
+                          ? '$_durationText ride → $_distanceText'
+                          : 'Loading route...',
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
@@ -525,7 +565,20 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
         decoration: BoxDecoration(
           color: AppColors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+          boxShadow: AppColors.softElevation(
+            isDark: isDark,
+            highContrast: highContrast,
+            tint: AppColors.primary,
+            strength: 0.85,
+          ),
+          border: Border.all(
+            color: AppColors.softStroke(
+              isDark: isDark,
+              highContrast: highContrast,
+              tint: AppColors.primary,
+              strength: 1.1,
+            ),
+          ),
         ),
         child: Row(
           children: [

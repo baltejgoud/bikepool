@@ -41,10 +41,17 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
                     : [const Color(0xFFE8F5E8), const Color(0xFFD4EDDA)],
               ),
               borderRadius: BorderRadius.circular(24),
+              boxShadow: AppColors.softElevation(
+                isDark: isDark,
+                highContrast: highContrast,
+                tint: const Color(0xFF22C55E),
+                strength: 1.0,
+              ),
               border: Border.all(
-                color: AppColors.outline(
+                color: AppColors.softStroke(
                   isDark: isDark,
                   highContrast: highContrast,
+                  tint: const Color(0xFF22C55E),
                 ),
               ),
             ),
@@ -132,8 +139,13 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
                 highContrast: highContrast,
               ),
               borderRadius: BorderRadius.circular(24),
+              boxShadow: AppColors.softElevation(
+                isDark: isDark,
+                highContrast: highContrast,
+                strength: 0.95,
+              ),
               border: Border.all(
-                color: AppColors.outline(
+                color: AppColors.softStroke(
                   isDark: isDark,
                   highContrast: highContrast,
                 ),
@@ -155,8 +167,13 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
                 highContrast: highContrast,
               ),
               borderRadius: BorderRadius.circular(18),
+              boxShadow: AppColors.softElevation(
+                isDark: isDark,
+                highContrast: highContrast,
+                strength: 0.9,
+              ),
               border: Border.all(
-                color: AppColors.outline(
+                color: AppColors.softStroke(
                   isDark: isDark,
                   highContrast: highContrast,
                 ),
@@ -224,8 +241,13 @@ class _StatCard extends StatelessWidget {
           highContrast: highContrast,
         ),
         borderRadius: BorderRadius.circular(18),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: highContrast,
+          strength: 0.85,
+        ),
         border: Border.all(
-          color: AppColors.outline(
+          color: AppColors.softStroke(
             isDark: isDark,
             highContrast: highContrast,
           ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_tokens.dart';
+
 class AppColors {
   // Brand Colors
   static const Color primary = Color(0xFF2F6B57); // Sage Green
@@ -19,9 +21,9 @@ class AppColors {
 
   // Text
   static const Color textPrimaryLight = Color(0xFF28483D);
-  static const Color textSecondaryLight = Color(0xFF72867D);
+  static const Color textSecondaryLight = Color(0xFF5A786B); // More distinct greyish-green
   static const Color textPrimaryDark = Color(0xFFEAF3EE);
-  static const Color textSecondaryDark = Color(0xFFA9BBB2);
+  static const Color textSecondaryDark = Color(0xFF8BA599); // Softer mint grey for dark mode
 
   // Status
   static const Color success = Color(0xFF5D9878);
@@ -64,6 +66,65 @@ class AppColors {
     return isDark ? const Color(0x335E7C70) : const Color(0xFFDCE6E0);
   }
 
+  static Color softStroke({
+    required bool isDark,
+    required bool highContrast,
+    Color? tint,
+    double strength = 1,
+  }) {
+    if (highContrast) {
+      return outline(isDark: isDark, highContrast: highContrast);
+    }
+
+    final base = tint ?? _shadowBase(isDark);
+    final alpha = isDark ? 0.12 : 0.07;
+    return base.withValues(alpha: _clampAlpha(alpha * strength));
+  }
+
+  static Color shadowColor({
+    required bool isDark,
+    required bool highContrast,
+    Color? tint,
+    double strength = 1,
+  }) {
+    final alpha = highContrast
+        ? (isDark ? 0.28 : 0.14)
+        : (isDark ? 0.24 : 0.10);
+    return (tint ?? _shadowBase(isDark)).withValues(
+      alpha: _clampAlpha(alpha * strength),
+    );
+  }
+
+  static List<BoxShadow> softElevation({
+    required bool isDark,
+    required bool highContrast,
+    Color? tint,
+    double strength = 1,
+  }) {
+    return [
+      BoxShadow(
+        color: shadowColor(
+          isDark: isDark,
+          highContrast: highContrast,
+          tint: tint,
+          strength: strength,
+        ),
+        blurRadius: (highContrast ? 12 : AppElevation.cardBlur) * strength,
+        offset: Offset(
+          0,
+          (highContrast ? 4 : AppElevation.cardOffsetY) * strength,
+        ),
+      ),
+      if (!isDark && !highContrast)
+        BoxShadow(
+          color: Colors.white.withValues(alpha: _clampAlpha(0.65 * strength)),
+          blurRadius: 2 * strength,
+          offset: const Offset(0, 1),
+          spreadRadius: -1,
+        ),
+    ];
+  }
+
   static Color secondaryText({
     required bool isDark,
     required bool highContrast,
@@ -84,5 +145,13 @@ class AppColors {
     return isDark
         ? const Color(0x66101814)
         : const Color(0x291E2C25);
+  }
+
+  static Color _shadowBase(bool isDark) {
+    return isDark ? Colors.black : const Color(0xFF173126);
+  }
+
+  static double _clampAlpha(double value) {
+    return value.clamp(0.0, 1.0).toDouble();
   }
 }

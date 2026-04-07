@@ -1,16 +1,21 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/auth/auth_provider.dart';
+import '../profile/providers/profile_setup_provider.dart';
 
-class OnboardingScreen extends StatefulWidget {
+class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
 
   @override
-  State<OnboardingScreen> createState() => _OnboardingScreenState();
+  ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen>
+class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -18,6 +23,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   final TextEditingController _phoneController = TextEditingController();
   bool _otpSent = false;
+  bool _isLoading = false;
+  String? _verificationId;
   final TextEditingController _otpController = TextEditingController();
 
   @override
@@ -139,7 +146,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                             ),
                       ),
                       const Spacer(),
-                      // Phone Input
+                      // OTP logic or Google Login
                       if (!_otpSent) ...[
                         Text(
                           'Enter your mobile number',
@@ -167,10 +174,95 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
-                          onPressed: () {
-                            setState(() => _otpSent = true);
-                          },
-                          child: const Text('Send OTP'),
+                          onPressed: _isLoading
+                              ? null
+                              : () async {
+                                  final phone = _phoneController.text.trim();
+                                  if (phone.length != 10) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Enter a valid 10-digit mobile number'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setState(() => _isLoading = true);
+
+                                  try {
+                                    final auth =
+                                        ref.read(authRepositoryProvider);
+                                    await auth.verifyPhone(
+                                      phoneNumber: '+91$phone',
+                                      disableAppVerificationForTesting:
+                                          kDebugMode && kIsWeb,
+                                      verificationCompleted:
+                                          (PhoneAuthCredential
+                                              credential) async {
+                                        // Auto-resolution (often works on Android)
+                                        await FirebaseAuth.instance
+                                            .signInWithCredential(credential);
+                                        if (context.mounted) {
+                                          ref
+                                              .read(
+                                                  profileSetupProvider.notifier)
+                                              .updatePhoneNumber(phone);
+                                          context.goNamed('home');
+                                        }
+                                      },
+                                      verificationFailed:
+                                          (FirebaseAuthException e) {
+                                        if (mounted) {
+                                          setState(() => _isLoading = false);
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                                content: Text(
+                                                    'Verification failed: ${e.message}')),
+                                          );
+                                        }
+                                      },
+                                      codeSent: (String verificationId,
+                                          int? resendToken) {
+                                        if (mounted) {
+                                          setState(() {
+                                            _isLoading = false;
+                                            _verificationId = verificationId;
+                                            _otpSent = true;
+                                          });
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                                content: Text(
+                                                    'OTP sent successfully!')),
+                                          );
+                                        }
+                                      },
+                                      codeAutoRetrievalTimeout:
+                                          (String verificationId) {
+                                        if (mounted) {
+                                          _verificationId = verificationId;
+                                        }
+                                      },
+                                    );
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      setState(() => _isLoading = false);
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(content: Text('Error: $e')),
+                                      );
+                                    }
+                                  }
+                                },
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : const Text('Send OTP'),
                         ),
                       ] else ...[
                         Text(
@@ -192,8 +284,85 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
-                          onPressed: () => context.goNamed('home'),
-                          child: const Text('Verify & Continue'),
+                          onPressed: _isLoading
+                              ? null
+                              : () async {
+                                  final code = _otpController.text.trim();
+                                  final phone = _phoneController.text.trim();
+
+                                  if (code.length != 6) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            'Enter the 6-digit OTP to continue'),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  setState(() => _isLoading = true);
+
+                                  try {
+                                    final auth =
+                                        ref.read(authRepositoryProvider);
+
+                                    // Developer Bypass for testing (000000)
+                                    if (code == '000000') {
+                                      await auth.signInAnonymously();
+                                      if (context.mounted) {
+                                        ref
+                                            .read(profileSetupProvider.notifier)
+                                            .updatePhoneNumber(phone);
+                                        context.goNamed('home');
+                                      }
+                                      return;
+                                    }
+
+                                    if (_verificationId != null) {
+                                      final userCred = await auth.signInWithOTP(
+                                        verificationId: _verificationId!,
+                                        smsCode: code,
+                                      );
+                                      if (userCred != null && context.mounted) {
+                                        ref
+                                            .read(profileSetupProvider.notifier)
+                                            .updatePhoneNumber(phone);
+                                        context.goNamed('home');
+                                      } else if (context.mounted) {
+                                        setState(() => _isLoading = false);
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                              content: Text(
+                                                  'Invalid OTP. Please try again.')),
+                                        );
+                                      }
+                                    } else {
+                                      setState(() => _isLoading = false);
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                            content: Text(
+                                                'Verification ID missing. Please resend OTP.')),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      setState(() => _isLoading = false);
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(content: Text('Error: $e')),
+                                      );
+                                    }
+                                  }
+                                },
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : const Text('Verify & Continue'),
                         ),
                         const SizedBox(height: 12),
                         Center(

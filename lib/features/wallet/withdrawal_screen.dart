@@ -47,7 +47,17 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
               decoration: BoxDecoration(
                 color: isDark ? AppColors.surfaceDark : Colors.grey[100],
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+                boxShadow: AppColors.softElevation(
+                  isDark: isDark,
+                  highContrast: false,
+                  strength: 0.8,
+                ),
+                border: Border.all(
+                  color: AppColors.softStroke(
+                    isDark: isDark,
+                    highContrast: false,
+                  ),
+                ),
               ),
               child: Row(
                 children: [
@@ -198,9 +208,25 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
               ? (isDark ? AppColors.primary.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.05))
               : (isDark ? AppColors.surfaceDark : Colors.grey[50]),
           borderRadius: BorderRadius.circular(16),
+          boxShadow: AppColors.softElevation(
+            isDark: isDark,
+            highContrast: false,
+            tint: isSelected ? AppColors.primary : null,
+            strength: isSelected ? 0.9 : 0.8,
+          ),
           border: Border.all(
-            color: isSelected ? AppColors.primary : (isDark ? Colors.white10 : Colors.black12),
-            width: isSelected ? 2 : 1,
+            color: isSelected
+                ? AppColors.softStroke(
+                    isDark: isDark,
+                    highContrast: false,
+                    tint: AppColors.primary,
+                    strength: 1.1,
+                  )
+                : AppColors.softStroke(
+                    isDark: isDark,
+                    highContrast: false,
+                  ),
+            width: isSelected ? 1.4 : 1,
           ),
         ),
         child: Row(

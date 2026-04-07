@@ -8,29 +8,31 @@ class AppTheme {
     return TextTheme(
       displayLarge: GoogleFonts.outfit(
         fontSize: 32,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w800,
         color: primary,
-        letterSpacing: -0.5,
+        letterSpacing: -0.7,
       ),
       displayMedium: GoogleFonts.outfit(
         fontSize: 26,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w800,
         color: primary,
         letterSpacing: -0.5,
       ),
       headlineMedium: GoogleFonts.outfit(
         fontSize: 22,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         color: primary,
+        letterSpacing: -0.3,
       ),
       titleLarge: GoogleFonts.inter(
         fontSize: 18,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         color: primary,
+        letterSpacing: -0.2,
       ),
       titleMedium: GoogleFonts.inter(
         fontSize: 16,
-        fontWeight: FontWeight.w500,
+        fontWeight: FontWeight.w600,
         color: primary,
       ),
       bodyLarge: GoogleFonts.inter(
@@ -39,20 +41,20 @@ class AppTheme {
         color: primary,
       ),
       bodyMedium: GoogleFonts.inter(
-        fontSize: 14,
-        fontWeight: FontWeight.w400,
+        fontSize: 13, // Slightly smaller
+        fontWeight: FontWeight.w500, // Medium weight for secondary
         color: secondary,
       ),
       labelLarge: GoogleFonts.inter(
         fontSize: 14,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700, // Bolder labels
         color: primary,
       ),
       labelSmall: GoogleFonts.inter(
-        fontSize: 11,
+        fontSize: 10, // Smaller for metadata
         fontWeight: FontWeight.w500,
         color: secondary,
-        letterSpacing: 0.5,
+        letterSpacing: 0.6,
       ),
     );
   }
@@ -161,14 +163,27 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: card,
-        elevation: 0,
+        elevation: highContrast ? 0 : 2,
+        shadowColor: AppColors.shadowColor(
+          isDark: isDark,
+          highContrast: highContrast,
+          strength: 0.9,
+        ),
+        surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.lg),
-          side: BorderSide(color: outline),
+          side: BorderSide(
+            color: AppColors.softStroke(
+              isDark: isDark,
+              highContrast: highContrast,
+            ),
+          ),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: surface,
+        backgroundColor: isDark 
+            ? primary.withValues(alpha: 0.15) 
+            : primary.withValues(alpha: 0.08),
         selectedColor: primary,
         disabledColor: surface,
         secondarySelectedColor: primary,
@@ -176,18 +191,23 @@ class AppTheme {
           horizontal: AppSpacing.sm,
           vertical: AppSpacing.xs,
         ),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.pill),
-          side: BorderSide(color: outline),
+          side: BorderSide(
+            color: isDark 
+                ? primary.withValues(alpha: 0.2) 
+                : primary.withValues(alpha: 0.1),
+          ),
         ),
         labelStyle: GoogleFonts.inter(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
           color: primaryText,
         ),
         secondaryLabelStyle: GoogleFonts.inter(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
           color: onPrimary,
         ),
         checkmarkColor: onPrimary,

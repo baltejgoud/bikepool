@@ -65,10 +65,6 @@ class VehicleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final highContrast = MediaQuery.of(context).highContrast;
-    final outline = AppColors.outline(
-      isDark: isDark,
-      highContrast: highContrast,
-    );
     final secondaryText = AppColors.secondaryText(
       isDark: isDark,
       highContrast: highContrast,
@@ -101,9 +97,22 @@ class VehicleCard extends StatelessWidget {
                       highContrast: highContrast,
                     ),
               borderRadius: BorderRadius.circular(AppRadii.lg),
+              boxShadow: AppColors.softElevation(
+                isDark: isDark,
+                highContrast: highContrast,
+                tint: isSelected ? AppColors.primary : null,
+                strength: isSelected ? 1.0 : 0.9,
+              ),
               border: Border.all(
-                color: isSelected ? AppColors.primary : outline,
-                width: isSelected || highContrast ? 2 : 1,
+                color: isSelected
+                    ? AppColors.primary.withValues(
+                        alpha: highContrast ? 1 : 0.28,
+                      )
+                    : AppColors.softStroke(
+                        isDark: isDark,
+                        highContrast: highContrast,
+                      ),
+                width: highContrast ? 2 : (isSelected ? 1.4 : 1),
               ),
             ),
             child: Column(

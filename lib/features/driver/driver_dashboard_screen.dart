@@ -129,8 +129,16 @@ class _MetricCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? AppColors.surfaceDark : const Color(0xFFF8F8F8),
         borderRadius: BorderRadius.circular(20),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: false,
+          strength: 0.85,
+        ),
         border: Border.all(
-          color: isDark ? Colors.white10 : Colors.black12,
+          color: AppColors.softStroke(
+            isDark: isDark,
+            highContrast: false,
+          ),
         ),
       ),
       child: Column(
@@ -185,13 +193,17 @@ class _ScheduledRideCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? AppColors.cardDark : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: false,
+          strength: 0.8,
+        ),
+        border: Border.all(
+          color: AppColors.softStroke(
+            isDark: isDark,
+            highContrast: false,
           ),
-        ],
+        ),
       ),
       child: Row(
         children: [

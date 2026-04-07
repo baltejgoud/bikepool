@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import '../../shared/widgets/app_pill.dart';
 
 class PlanRideSheet extends StatelessWidget {
   final String vehicleTitle;
@@ -58,11 +59,9 @@ class PlanRideSheet extends StatelessWidget {
                     child: Center(
                       child: Text(
                         'Plan your ride',
-                        style: GoogleFonts.inter(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                     ),
                   ),
@@ -214,32 +213,12 @@ class PlanRideSheet extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.start,
                       children: [
-                        const SizedBox(
-                            width:
-                                24), // Offset to align with text fields start
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: vehicleColor.withValues(alpha: 0.1),
-                            borderRadius:
-                                BorderRadius.circular(20), // Pill style
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(vehicleIcon, size: 14, color: vehicleColor),
-                              const SizedBox(width: 6),
-                              Text(
-                                vehicleTitle,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: vehicleColor,
-                                ),
-                              ),
-                            ],
-                          ),
+                        const SizedBox(width: 24),
+                        AppPill(
+                          label: vehicleTitle,
+                          icon: vehicleIcon,
+                          pillContext: AppPillContext.primary,
+                          style: AppPillStyle.soft,
                         ),
                       ],
                     ),

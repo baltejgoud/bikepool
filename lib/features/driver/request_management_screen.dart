@@ -237,16 +237,17 @@ class _RequestCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? AppColors.cardDark : Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: false,
+          strength: 0.95,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
+        border: Border.all(
+          color: AppColors.softStroke(
+            isDark: isDark,
+            highContrast: false,
           ),
-        ],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

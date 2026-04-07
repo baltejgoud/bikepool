@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
+import '../../core/providers/data_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../shared/widgets/app_back_button.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher_string.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 
 class _RideUserProfile {
   final String name;
@@ -42,16 +49,16 @@ class _Review {
   });
 }
 
-class TrackingScreen extends StatefulWidget {
+class TrackingScreen extends ConsumerStatefulWidget {
   final String rideId;
 
   const TrackingScreen({super.key, required this.rideId});
 
   @override
-  State<TrackingScreen> createState() => _TrackingScreenState();
+  ConsumerState<TrackingScreen> createState() => _TrackingScreenState();
 }
 
-class _TrackingScreenState extends State<TrackingScreen>
+class _TrackingScreenState extends ConsumerState<TrackingScreen>
     with TickerProviderStateMixin {
   late AnimationController _panelController;
   late Animation<double> _panelAnimation;
@@ -107,6 +114,8 @@ class _TrackingScreenState extends State<TrackingScreen>
   void dispose() {
     _panelController.dispose();
     _pulseController.dispose();
+    _chatTextController.dispose();
+    _chatScrollController.dispose();
     super.dispose();
   }
 
@@ -115,7 +124,12 @@ class _TrackingScreenState extends State<TrackingScreen>
     final mediaQuery = MediaQuery.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final highContrast = mediaQuery.highContrast;
-    const routePoints = [
+    // Watch the ride and driver location in real-time
+    final driverLocationAsync =
+        ref.watch(driverLocationProvider(widget.rideId));
+
+    // Default route points (fallback)
+    const defaultRoutePoints = [
       LatLng(17.4435, 78.3772),
       LatLng(17.4460, 78.3820),
       LatLng(17.4500, 78.3900),
@@ -132,8 +146,11 @@ class _TrackingScreenState extends State<TrackingScreen>
                 'Shows the driver on the way to your destination. Ride details are in the bottom drawer.',
             child: ExcludeSemantics(
               child: FlutterMap(
-                options: const MapOptions(
-                  initialCenter: LatLng(17.4460, 78.3820),
+                options: MapOptions(
+                  initialCenter: driverLocationAsync.value != null
+                      ? LatLng(driverLocationAsync.value!.lat,
+                          driverLocationAsync.value!.lng)
+                      : defaultRoutePoints[0],
                   initialZoom: 14.5,
                 ),
                 children: [
@@ -147,7 +164,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                   PolylineLayer(
                     polylines: [
                       Polyline(
-                        points: routePoints,
+                        points: defaultRoutePoints,
                         color: AppColors.primary,
                         strokeWidth: highContrast ? 7 : 6,
                       ),
@@ -156,7 +173,10 @@ class _TrackingScreenState extends State<TrackingScreen>
                   MarkerLayer(
                     markers: [
                       Marker(
-                        point: routePoints[0],
+                        point: driverLocationAsync.value != null
+                            ? LatLng(driverLocationAsync.value!.lat,
+                                driverLocationAsync.value!.lng)
+                            : defaultRoutePoints[0],
                         width: 80,
                         height: 80,
                         child: AnimatedBuilder(
@@ -167,14 +187,17 @@ class _TrackingScreenState extends State<TrackingScreen>
                               children: [
                                 // Pulsing Rings
                                 ...List.generate(2, (index) {
-                                  final progress = (_pulseController.value + (index * 0.5)) % 1.0;
+                                  final progress =
+                                      (_pulseController.value + (index * 0.5)) %
+                                          1.0;
                                   return Container(
                                     width: 80 * progress,
                                     height: 80 * progress,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       border: Border.all(
-                                        color: AppColors.primary.withValues(alpha: 1.0 - progress),
+                                        color: AppColors.primary
+                                            .withValues(alpha: 1.0 - progress),
                                         width: 2,
                                       ),
                                     ),
@@ -189,8 +212,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                                     shape: BoxShape.circle,
                                     boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.primary
-                                            .withValues(alpha: highContrast ? 0.65 : 0.50),
+                                        color: AppColors.primary.withValues(
+                                            alpha: highContrast ? 0.65 : 0.50),
                                         blurRadius: highContrast ? 8 : 12,
                                       ),
                                     ],
@@ -211,7 +234,7 @@ class _TrackingScreenState extends State<TrackingScreen>
                         ),
                       ),
                       Marker(
-                        point: routePoints.last,
+                        point: defaultRoutePoints.last,
                         width: 36,
                         height: 36,
                         child: const Icon(
@@ -292,7 +315,7 @@ class _TrackingScreenState extends State<TrackingScreen>
             Positioned(
               top: mediaQuery.padding.top + 80,
               right: 16,
-              child: _buildEmergencyCard(isDark, highContrast),
+              child: _buildEmergencyCard(isDark, highContrast, driverLocationAsync),
             ),
           AnimatedBuilder(
             animation: _panelAnimation,
@@ -470,7 +493,7 @@ class _TrackingScreenState extends State<TrackingScreen>
     );
   }
 
-  Widget _buildEmergencyCard(bool isDark, bool highContrast) {
+  Widget _buildEmergencyCard(bool isDark, bool highContrast, AsyncValue<dynamic> driverLocationAsync) {
     return Semantics(
       container: true,
       label: 'Emergency actions card',
@@ -482,14 +505,13 @@ class _TrackingScreenState extends State<TrackingScreen>
             highContrast: highContrast,
           ),
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: highContrast ? 0.24 : 0.15),
-              blurRadius: highContrast ? 8 : 16,
-            ),
-          ],
+          boxShadow: AppColors.softElevation(
+            isDark: isDark,
+            highContrast: highContrast,
+            strength: 0.9,
+          ),
           border: Border.all(
-            color: AppColors.outline(
+            color: AppColors.softStroke(
               isDark: isDark,
               highContrast: highContrast,
             ),
@@ -506,7 +528,12 @@ class _TrackingScreenState extends State<TrackingScreen>
                 backgroundColor: AppColors.error,
                 minimumSize: const Size(160, 40),
               ),
-              onPressed: () {},
+              onPressed: () async {
+                const url = 'tel:112';
+                if (await canLaunchUrlString(url)) {
+                  await launchUrlString(url);
+                }
+              },
               child: const Text('Call Emergency'),
             ),
             const SizedBox(height: 8),
@@ -515,7 +542,15 @@ class _TrackingScreenState extends State<TrackingScreen>
                 backgroundColor: AppColors.secondary,
                 minimumSize: const Size(160, 40),
               ),
-              onPressed: () {},
+              onPressed: () {
+                String locationText = 'Emergency! I need help.';
+                if (driverLocationAsync.value != null) {
+                  final lat = driverLocationAsync.value!.lat;
+                  final lng = driverLocationAsync.value!.lng;
+                  locationText = 'Emergency! My ride is currently at: https://maps.google.com/?q=$lat,$lng';
+                }
+                SharePlus.instance.share(ShareParams(text: locationText));
+              },
               child: const Text('Share Location'),
             ),
           ],
@@ -834,8 +869,13 @@ class _TrackingScreenState extends State<TrackingScreen>
           highContrast: highContrast,
         ),
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: highContrast,
+          strength: 0.8,
+        ),
         border: Border.all(
-          color: AppColors.outline(
+          color: AppColors.softStroke(
             isDark: isDark,
             highContrast: highContrast,
           ),
@@ -1022,8 +1062,13 @@ class _TrackingScreenState extends State<TrackingScreen>
           highContrast: highContrast,
         ),
         borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: highContrast,
+          strength: 0.8,
+        ),
         border: Border.all(
-          color: AppColors.outline(
+          color: AppColors.softStroke(
             isDark: isDark,
             highContrast: highContrast,
           ),
@@ -1180,7 +1225,8 @@ class _TrackingScreenState extends State<TrackingScreen>
                       children: [
                         CircleAvatar(
                           radius: 34,
-                          backgroundColor: AppColors.primary.withValues(alpha: 0.2),
+                          backgroundColor:
+                              AppColors.primary.withValues(alpha: 0.2),
                           child: const Icon(
                             Icons.person_rounded,
                             color: AppColors.primary,
@@ -1403,209 +1449,148 @@ class _TrackingScreenState extends State<TrackingScreen>
     );
   }
 
+  final _chatTextController = TextEditingController();
+  final _chatScrollController = ScrollController();
+
+  void _sendMessage(String text, WidgetRef ref) async {
+    if (text.trim().isEmpty) return;
+    final content = text.trim();
+    _chatTextController.clear();
+    final userProfile = ref.read(userProfileProvider).value;
+    await ref.read(chatServiceProvider).sendMessage(
+          rideId: widget.rideId,
+          senderId: FirebaseAuth.instance.currentUser?.uid ?? '',
+          senderName: userProfile?.fullName ?? 'User',
+          text: content,
+        );
+  }
+
   void _openChatSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final isDark = Theme.of(ctx).brightness == Brightness.dark;
-        final highContrast = MediaQuery.of(ctx).highContrast;
-        final quickReplies = <String>[
-          "I'm here",
-          'Wearing a red jacket',
-          'Arriving in 2 min',
-        ];
-        final messages = <Map<String, String>>[
-          {'from': 'driver', 'text': 'Hi! I will be there in 3 minutes.'},
-        ];
-        final textController = TextEditingController();
+        return Consumer(
+          builder: (context, ref, child) {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final highContrast = MediaQuery.of(context).highContrast;
+            final messagesAsync =
+                ref.watch(rideMessagesProvider(widget.rideId));
 
-        return StatefulBuilder(
-          builder: (context, setInnerState) {
-            final sheetHeight = MediaQuery.of(context).size.height * 0.55;
-
-            void sendMessage(String text) {
-              final trimmed = text.trim();
-              if (trimmed.isEmpty) return;
-              setInnerState(() {
-                messages.add({'from': 'you', 'text': trimmed});
-                textController.clear();
-              });
-            }
-
-            return Semantics(
-              container: true,
-              scopesRoute: true,
-              namesRoute: true,
-              explicitChildNodes: true,
-              label: 'Chat drawer',
-              child: Padding(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom,
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.panelBackground(
+                    isDark: isDark,
+                    highContrast: highContrast,
+                  ),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(28)),
                 ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.panelBackground(
-                      isDark: isDark,
-                      highContrast: highContrast,
-                    ),
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(28)),
-                    border: Border.all(
-                      color: AppColors.outline(
-                        isDark: isDark,
-                        highContrast: highContrast,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 12),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                  ),
-                  child: SizedBox(
-                    height: sheetHeight,
-                    child: Column(
-                      children: [
-                        Container(
-                          margin: const EdgeInsets.symmetric(vertical: 12),
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.white24 : Colors.black12,
-                            borderRadius: BorderRadius.circular(2),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Chat',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(),
+                    Flexible(
+                      child: messagesAsync.when(
+                        data: (messages) => ListView.builder(
+                          controller: _chatScrollController,
+                          reverse: true,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          shrinkWrap: true,
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final message = messages[index];
+                            final isMe = message.senderId ==
+                                FirebaseAuth.instance.currentUser?.uid;
+                            return _ChatBubble(
+                              message: message.text,
+                              isMe: isMe,
+                              timestamp: message.timestamp,
+                            );
+                          },
+                        ),
+                        loading: () => const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: CircularProgressIndicator(),
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'Chat with ${_driverProfile.name}',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium,
+                        error: (err, _) => Center(child: Text('Error: $err')),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _chatTextController,
+                              decoration: InputDecoration(
+                                hintText: 'Type a message...',
+                                filled: true,
+                                fillColor: isDark
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.black.withValues(alpha: 0.05),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(24),
+                                  borderSide: BorderSide.none,
                                 ),
                               ),
-                              IconButton(
-                                onPressed: () => Navigator.pop(context),
-                                icon: const Icon(Icons.close_rounded),
-                                tooltip: 'Close chat',
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: quickReplies
-                                .map(
-                                  (reply) => ActionChip(
-                                    label: Text(reply),
-                                    onPressed: () => sendMessage(reply),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: ListView.builder(
-                              reverse: true,
-                              itemCount: messages.length,
-                              itemBuilder: (context, index) {
-                                final message =
-                                    messages[messages.length - 1 - index];
-                                final isUser = message['from'] == 'you';
-                                return Align(
-                                  alignment: isUser
-                                      ? Alignment.centerRight
-                                      : Alignment.centerLeft,
-                                  child: Container(
-                                    margin:
-                                        const EdgeInsets.symmetric(vertical: 4),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 10,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: isUser
-                                          ? AppColors.primary
-                                          : AppColors.surfaceBackground(
-                                              isDark: isDark,
-                                              highContrast: highContrast,
-                                            ),
-                                      borderRadius: BorderRadius.circular(18),
-                                    ),
-                                    child: Text(
-                                      message['text'] ?? '',
-                                      style: GoogleFonts.inter(
-                                        color: isUser ? Colors.white : null,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
+                              onSubmitted: (val) => _sendMessage(val, ref),
                             ),
                           ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: textController,
-                                  onSubmitted: sendMessage,
-                                  decoration: InputDecoration(
-                                    hintText: 'Send a message',
-                                    filled: true,
-                                    fillColor: AppColors.surfaceBackground(
-                                      isDark: isDark,
-                                      highContrast: highContrast,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(18),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Semantics(
-                                button: true,
-                                label: 'Send message',
-                                child: ElevatedButton(
-                                  onPressed: () =>
-                                      sendMessage(textController.text),
-                                  style: ElevatedButton.styleFrom(
-                                    shape: const CircleBorder(),
-                                    padding: const EdgeInsets.all(14),
-                                  ),
-                                  child: const Icon(Icons.send_rounded),
-                                ),
-                              ),
-                            ],
+                          const SizedBox(width: 8),
+                          CircleAvatar(
+                            backgroundColor: AppColors.primary,
+                            child: IconButton(
+                              icon: const Icon(Icons.send, color: Colors.white),
+                              onPressed: () =>
+                                  _sendMessage(_chatTextController.text, ref),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             );
           },
         );
       },
-    );
+    ).then((_) {
+      _chatTextController.clear();
+    });
   }
 
   void _showCallDialog(BuildContext context) {
@@ -1623,7 +1608,37 @@ class _TrackingScreenState extends State<TrackingScreen>
             child: const Text('Cancel'),
           ),
           ElevatedButton.icon(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () async {
+              try {
+                final result = await FirebaseFunctions.instance
+                    .httpsCallable('initiateMaskedCall')
+                    .call({
+                  'rideId': widget.rideId,
+                });
+
+                if (result.data['success'] == true) {
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Connecting call...')),
+                    );
+                  }
+                } else {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('Failed to call: ${result.data['error']}')),
+                    );
+                  }
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
+              }
+            },
             icon: const Icon(Icons.call_rounded),
             label: const Text('Call now'),
           ),
@@ -1713,7 +1728,9 @@ class _ProgressStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(
-            isComplete ? Icons.check_circle_rounded : Icons.radio_button_checked,
+            isComplete
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_checked,
             size: 16,
             color: color,
           ),
@@ -1726,6 +1743,66 @@ class _ProgressStep extends StatelessWidget {
               color: color,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChatBubble extends StatelessWidget {
+  final String message;
+  final bool isMe;
+  final DateTime timestamp;
+
+  const _ChatBubble({
+    required this.message,
+    required this.isMe,
+    required this.timestamp,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final timeStr = DateFormat('h:mm a').format(timestamp);
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment:
+            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: isMe
+                  ? AppColors.primary
+                  : (isDark ? Colors.grey[800] : Colors.grey[200]),
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isMe ? 16 : 0),
+                bottomRight: Radius.circular(isMe ? 0 : 16),
+              ),
+            ),
+            child: Text(
+              message,
+              style: TextStyle(
+                color: isMe ? Colors.white : (isDark ? Colors.white : Colors.black87),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              timeStr,
+              style: TextStyle(
+                fontSize: 10,
+                color: isDark ? Colors.white38 : Colors.black38,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
         ],
       ),
     );

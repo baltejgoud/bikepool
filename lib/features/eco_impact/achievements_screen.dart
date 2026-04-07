@@ -36,10 +36,17 @@ class AchievementsScreen extends StatelessWidget {
                 colors: _getTierColors(tier),
               ),
               borderRadius: BorderRadius.circular(24),
+              boxShadow: AppColors.softElevation(
+                isDark: isDark,
+                highContrast: highContrast,
+                tint: _getTierColors(tier).first,
+                strength: 1.0,
+              ),
               border: Border.all(
-                color: AppColors.outline(
+                color: AppColors.softStroke(
                   isDark: isDark,
                   highContrast: highContrast,
+                  tint: _getTierColors(tier).first,
                 ),
               ),
             ),
@@ -156,10 +163,21 @@ class _MilestoneCard extends StatelessWidget {
                 highContrast: highContrast,
               ),
         borderRadius: BorderRadius.circular(18),
+        boxShadow: AppColors.softElevation(
+          isDark: isDark,
+          highContrast: highContrast,
+          tint: milestone.isCompleted ? AppColors.primary : null,
+          strength: 0.9,
+        ),
         border: Border.all(
           color: milestone.isCompleted
-              ? AppColors.primary.withValues(alpha: 0.2)
-              : AppColors.outline(
+              ? AppColors.softStroke(
+                  isDark: isDark,
+                  highContrast: highContrast,
+                  tint: AppColors.primary,
+                  strength: 1.1,
+                )
+              : AppColors.softStroke(
                   isDark: isDark,
                   highContrast: highContrast,
                 ),

@@ -1,10 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:uuid/uuid.dart';
+import '../../core/models/lat_lng_point.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/app_back_button.dart';
 import '../../shared/widgets/vehicle_card.dart';
+import '../../core/providers/data_providers.dart';
+import '../../core/providers/maps_providers.dart';
+import '../../core/services/models/place_prediction.dart';
 import 'providers/driver_ride_provider.dart';
 
 class OfferRideScreen extends ConsumerStatefulWidget {
@@ -18,14 +26,32 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
   // Step 1: Route
   final TextEditingController _destinationController = TextEditingController();
   String _distance = '-';
+  String _duration = '-';
   String _earningsRange = '₹-- – ₹--';
+  bool _isLoading = false;
+
+  // Places Autocomplete
+  List<PlacePrediction> _predictions = [];
+  Timer? _searchDebounce;
+  String _sessionToken = const Uuid().v4();
+  bool _showPredictions = false;
+
+  // Real coordinates from GPS + Places API
+  double? _originLat;
+  double? _originLng;
+  double? _destLat;
+  double? _destLng;
+
+  List<LatLngPoint> _routePolyline = [];
+  int? _distanceMeters;
+  int? _durationSeconds;
 
   // Step 2: Ride Details
   bool _isBike = true;
   bool _isNow = true;
   TimeOfDay? _departureTime;
   int _availableSeats = 1;
-  double _price = 0; // Will be set by smart defaults
+  double _price = 0;
   bool _isLoadingPrice = false;
 
   // Step 3: Preferences
@@ -37,8 +63,8 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
   @override
   void initState() {
     super.initState();
-    _destinationController.addListener(_onDestinationChanged);
     _applySmartDefaults();
+    _fetchCurrentLocation();
   }
 
   void _applySmartDefaults() {
@@ -46,31 +72,137 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
       _isBike = true;
       _isNow = true;
       _availableSeats = 1;
-      _price = 45.0; // Base smart default
+      _price = 45.0;
     });
   }
 
-  void _onDestinationChanged() {
-    if (_destinationController.text.length > 3) {
+  Future<void> _fetchCurrentLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      if (mounted) {
+        setState(() {
+          _originLat = position.latitude;
+          _originLng = position.longitude;
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _onDestinationTextChanged(String query) {
+    _searchDebounce?.cancel();
+    if (query.trim().length < 2) {
       setState(() {
-        _isLoadingPrice = true;
+        _predictions = [];
+        _showPredictions = false;
       });
-      Future.delayed(const Duration(milliseconds: 600), () {
+      return;
+    }
+
+    setState(() => _showPredictions = true);
+
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
+      final mapsService = ref.read(googleMapsServiceProvider);
+      try {
+        final results = await mapsService.searchPlaces(
+          query,
+          sessionToken: _sessionToken,
+        );
+        if (mounted) {
+          setState(() => _predictions = results);
+        }
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _onPredictionSelected(PlacePrediction prediction) async {
+    _destinationController.text = prediction.mainText;
+    setState(() {
+      _showPredictions = false;
+      _predictions = [];
+      _isLoadingPrice = true;
+    });
+
+    final mapsService = ref.read(googleMapsServiceProvider);
+    final details = await mapsService.getPlaceDetails(
+      prediction.placeId,
+      sessionToken: _sessionToken,
+    );
+    _sessionToken = const Uuid().v4();
+
+    if (details == null || !mounted) {
+      setState(() => _isLoadingPrice = false);
+      return;
+    }
+
+    _destLat = details.lat;
+    _destLng = details.lng;
+
+
+    // Get real route + distance using Directions API
+    if (_originLat != null && _originLng != null) {
+      final route = await mapsService.getDirections(
+        origin: LatLngPoint(lat: _originLat!, lng: _originLng!),
+        destination: LatLngPoint(lat: _destLat!, lng: _destLng!),
+      );
+
+      if (route != null && mounted) {
+        _routePolyline = route.polylinePoints;
+        _distanceMeters = route.distanceMeters;
+        _durationSeconds = route.durationSeconds;
+
+        // Compute real fare
+        double serverFare;
+        try {
+          serverFare = await ref.read(rideRepositoryProvider).getServerFare(
+                origin: LatLngPoint(lat: _originLat!, lng: _originLng!),
+                destination: LatLngPoint(lat: _destLat!, lng: _destLng!),
+                vehicleType: _isBike ? 'bike' : 'car',
+                demandFactor: 1.0,
+              );
+        } catch (_) {
+          serverFare = _isBike ? 50.0 : 180.0;
+        }
+
         if (mounted) {
           setState(() {
-            _distance = '15.2 km'; // Simulated
-            _earningsRange = _isBike ? '₹40–₹80' : '₹150–₹250';
-            _price = _isBike ? 50.0 : 180.0;
+            _distance = route.distanceText;
+            _duration = route.durationText;
+            _earningsRange = _isBike
+                ? '₹${(serverFare * 0.8).round()}–₹${(serverFare * 1.2).round()}'
+                : '₹${(serverFare * 0.8).round()}–₹${(serverFare * 1.2).round()}';
+            _price = serverFare;
             _isLoadingPrice = false;
           });
         }
-      });
-    } else {
-      setState(() {
-        _distance = '-';
-        _earningsRange = '₹-- – ₹--';
-        _isLoadingPrice = false;
-      });
+        return;
+      }
+    }
+
+    setState(() => _isLoadingPrice = false);
+  }
+
+  /// Recalculate fare when vehicle type or seats change after destination already selected
+  Future<void> _recalculateFare() async {
+    if (_destLat == null || _destLng == null || _originLat == null || _originLng == null) return;
+    setState(() => _isLoadingPrice = true);
+    try {
+      final serverFare = await ref.read(rideRepositoryProvider).getServerFare(
+            origin: LatLngPoint(lat: _originLat!, lng: _originLng!),
+            destination: LatLngPoint(lat: _destLat!, lng: _destLng!),
+            vehicleType: _isBike ? 'bike' : 'car',
+            demandFactor: 1.0,
+          );
+      if (mounted) {
+        setState(() {
+          _earningsRange = '₹${(serverFare * 0.8).round()}–₹${(serverFare * 1.2).round()}';
+          _price = serverFare;
+          _isLoadingPrice = false;
+        });
+      }
+    } catch (_) {
+      setState(() => _isLoadingPrice = false);
     }
   }
 
@@ -90,6 +222,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
   @override
   void dispose() {
     _destinationController.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
@@ -190,8 +323,9 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                       Expanded(
                         child: TextField(
                           controller: _destinationController,
+                          onChanged: _onDestinationTextChanged,
                           decoration: InputDecoration(
-                            hintText: 'Where are you heading?',
+                            hintText: 'Search destination...',
                             hintStyle: GoogleFonts.inter(
                               color: AppColors.textSecondaryLight,
                             ),
@@ -213,6 +347,66 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                 ],
               ),
             ),
+            // Predictions dropdown
+            if (_showPredictions && _predictions.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                constraints: const BoxConstraints(maxHeight: 220),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.surfaceDark : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isDark ? Colors.white10 : Colors.black12,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  itemCount: _predictions.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.06),
+                  ),
+                  itemBuilder: (context, index) {
+                    final prediction = _predictions[index];
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(
+                        Icons.location_on_outlined,
+                        size: 20,
+                        color: AppColors.accent,
+                      ),
+                      title: Text(
+                        prediction.mainText,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        prediction.secondaryText,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => _onPredictionSelected(prediction),
+                    );
+                  },
+                ),
+              ),
             const SizedBox(height: 16),
             // Distance & Earnings Strip
             AnimatedContainer(
@@ -222,7 +416,8 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
               decoration: BoxDecoration(
                 color: AppColors.accent.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
+                border:
+                    Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -279,7 +474,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
             // STEP 2: RIDE DETAILS
             _SectionHeader(title: 'Step 2: Ride Details', isDark: isDark),
             const SizedBox(height: 16),
-            
+
             // Time & Vehicle
             Row(
               children: [
@@ -347,7 +542,10 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                                         : 'Later',
                                     style: GoogleFonts.inter(
                                       fontWeight: FontWeight.w600,
-                                      fontSize: !_isNow && _departureTime != null ? 12 : 14,
+                                      fontSize:
+                                          !_isNow && _departureTime != null
+                                              ? 12
+                                              : 14,
                                       color: !_isNow
                                           ? (isDark
                                               ? Colors.black
@@ -394,7 +592,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                                     _isBike = true;
                                     _availableSeats = 1;
                                   });
-                                  _onDestinationChanged();
+                                  _recalculateFare();
                                 },
                                 child: Container(
                                   decoration: BoxDecoration(
@@ -419,7 +617,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                                   setState(() {
                                     _isBike = false;
                                   });
-                                  _onDestinationChanged();
+                                  _recalculateFare();
                                 },
                                 child: Container(
                                   decoration: BoxDecoration(
@@ -447,7 +645,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            
+
             // Seats
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -473,13 +671,12 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                         ? null
                         : () {
                             setState(() => _availableSeats = seatNum);
-                            _onDestinationChanged();
+                            _recalculateFare();
                           },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       curve: Curves.easeInOut,
-                      margin: EdgeInsets.only(
-                          right: index < 3 ? 12 : 0),
+                      margin: EdgeInsets.only(right: index < 3 ? 12 : 0),
                       height: 52,
                       decoration: BoxDecoration(
                         color: isDisabled
@@ -503,7 +700,8 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
                           color: isDisabled
-                              ? AppColors.textSecondaryLight.withValues(alpha: 0.5)
+                              ? AppColors.textSecondaryLight
+                                  .withValues(alpha: 0.5)
                               : isSelected
                                   ? (isDark ? Colors.black : Colors.white)
                                   : (isDark
@@ -571,7 +769,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                       color: isDark ? Colors.black26 : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                          color: isDark ? Colors.white10 : Colors.black12),
+                          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -643,8 +841,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                   label: 'Women only',
                   isSelected: _prefWomenOnly,
                   isDark: isDark,
-                  onTap: () =>
-                      setState(() => _prefWomenOnly = !_prefWomenOnly),
+                  onTap: () => setState(() => _prefWomenOnly = !_prefWomenOnly),
                 ),
                 _PreferenceChip(
                   icon: _prefChat
@@ -664,37 +861,59 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: () async {
-                  // Update Driver Ride Provider
-                  ref.read(driverRideProvider.notifier).postRide(
-                        from: 'Current Location', // Simplified for mock
-                        to: _destinationController.text.isEmpty
-                            ? 'Selected Destination'
-                            : _destinationController.text,
-                        time: _isNow ? 'Now' : 'Scheduled',
-                        seats: _availableSeats,
-                        price: _price,
-                        vehicleType: _isBike ? VehicleType.bike : VehicleType.car,
-                      );
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        setState(() => _isLoading = true);
+                        try {
+                          // Update Driver Ride Provider
+                          await ref.read(driverRideProvider.notifier).postRide(
+                                from: 'Current Location',
+                                to: _destinationController.text.isEmpty
+                                    ? 'Selected Destination'
+                                    : _destinationController.text,
+                                time: _isNow ? 'Now' : 'Scheduled',
+                                seats: _availableSeats,
+                                price: _price,
+                                vehicleType: _isBike
+                                    ? VehicleType.bike
+                                    : VehicleType.car,
+                                originLat: _originLat ?? 0.0,
+                                originLng: _originLng ?? 0.0,
+                                destinationLat: _destLat ?? 0.0,
+                                destinationLng: _destLng ?? 0.0,
+                                routePolyline: _routePolyline.isNotEmpty ? _routePolyline : null,
+                                distanceMeters: _distanceMeters,
+                                durationSeconds: _durationSeconds,
+                                distanceText: _distance != '-' ? _distance : null,
+                                durationText: _duration != '-' ? _duration : null,
+                              );
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        '✅ Ride posted successfully!',
-                        style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                      ),
-                      backgroundColor: AppColors.accent,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  );
-                  await Future.delayed(const Duration(seconds: 1));
-                  if (!context.mounted) return;
-                  if (mounted) {
-                    context.pushNamed('request-management');
-                  }
-                },
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                '✅ Ride posted successfully!',
+                                style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              backgroundColor: AppColors.accent,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          );
+                          if (context.mounted) context.pop(); // Returns to Home screen
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error posting ride: $e')),
+                            );
+                          }
+                        } finally {
+                          if (mounted) setState(() => _isLoading = false);
+                        }
+                      },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: isDark ? Colors.black : Colors.white,
@@ -772,9 +991,8 @@ class _PreferenceChip extends StatelessWidget {
               : (isDark ? AppColors.surfaceDark : AppColors.surfaceLight),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isSelected
-                ? color
-                : (isDark ? Colors.white10 : Colors.black12),
+            color:
+                isSelected ? color : (isDark ? Colors.white10 : Colors.black12),
           ),
         ),
         child: Row(

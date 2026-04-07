@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1078413552979",
+    "project_id": "bikepool-4c5f5",
+    "storage_bucket": "bikepool-4c5f5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1078413552979:android:36c585b227d5505e9d85a6",
+        "android_client_info": {
+          "package_name": "com.example.bikepool"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-P2FcnRXmhcdee4hBSIEDcIJOHWMaCTc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
