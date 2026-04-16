@@ -187,7 +187,9 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
     if (_destLat == null ||
         _destLng == null ||
         _originLat == null ||
-        _originLng == null) return;
+        _originLng == null) {
+      return;
+    }
     setState(() => _isLoadingPrice = true);
     try {
       final serverFare = await ref.read(rideRepositoryProvider).getServerFare(
