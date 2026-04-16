@@ -7,6 +7,7 @@ import '../../core/theme/app_tokens.dart';
 enum VehicleType { bike, car }
 
 class RideOption {
+  final String? rideId;
   final VehicleType type;
   final String name;
   final int seats;
@@ -27,6 +28,7 @@ class RideOption {
   final String? trustLabel;
 
   const RideOption({
+    this.rideId,
     required this.type,
     required this.name,
     required this.seats,

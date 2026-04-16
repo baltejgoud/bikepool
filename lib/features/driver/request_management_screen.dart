@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/app_back_button.dart';
+import '../../core/providers/data_providers.dart';
+import '../../core/models/ride_request_model.dart';
 import 'providers/driver_ride_provider.dart';
 
 class RequestManagementScreen extends ConsumerStatefulWidget {
@@ -14,78 +16,72 @@ class RequestManagementScreen extends ConsumerStatefulWidget {
       _RequestManagementScreenState();
 }
 
-class _RequestManagementScreenState extends ConsumerState<RequestManagementScreen> {
-  // Mock data for requests with added distance and time for realism
-  final List<Map<String, dynamic>> _requests = [
-    {
-      'id': '1',
-      'name': 'Rahul S.',
-      'rating': 4.8,
-      'pickup': 'JNTU, Kukatpally',
-      'pickup_dist': '1.2 km away',
-      'drop': 'Madhapur',
-      'drop_dist': 'Off route by 500m',
-      'time': '15 min est.',
-      'price': 45.0,
-      'isAccepted': false,
-    },
-    {
-      'id': '2',
-      'name': 'Priya K.',
-      'rating': 4.9,
-      'pickup': 'KPHB Colony',
-      'pickup_dist': '0.5 km away',
-      'drop': 'Hi-Tech City',
-      'drop_dist': 'On your route',
-      'time': '10 min est.',
-      'price': 50.0,
-      'isAccepted': false,
-    },
-  ];
+class _RequestManagementScreenState
+    extends ConsumerState<RequestManagementScreen> {
+  // Replaced mock data with Riverpod streams
 
-  void _handleRequest(int index, bool accept) {
+
+  void _handleRequest(RideRequestModel request, bool accept) async {
     if (accept) {
-      final rider = _requests[index];
       // Update Driver Ride Provider
       ref.read(driverRideProvider.notifier).acceptRider(
-            name: rider['name'],
-            rating: rider['rating'],
-            pickup: rider['pickup'],
-            drop: rider['drop'],
+            riderUid: request.riderUid,
+            name: request.riderName,
+            rating: request.riderRating,
+            pickup: request.pickupLocation,
+            drop: request.dropLocation,
           );
+      
+      await ref.read(rideRepositoryProvider).updateRideRequestStatus(
+        request.id!, 
+        RideRequestStatus.accepted
+      );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Ride accepted for ${rider['name']}!'),
-          backgroundColor: AppColors.primary,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Ride accepted for ${request.riderName}!'),
+            backgroundColor: AppColors.primary,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } else {
+      await ref.read(rideRepositoryProvider).updateRideRequestStatus(
+        request.id!, 
+        RideRequestStatus.declined
       );
     }
-    setState(() {
-      _requests.removeAt(index);
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final currentRideId = ref.watch(driverRideProvider.notifier).currentRideId;
+    final requestsAsync = ref.watch(rideRequestsProvider(currentRideId ?? ''));
+
     return Scaffold(
-      backgroundColor: isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
+      backgroundColor:
+          isDark ? AppColors.backgroundDark : AppColors.backgroundLight,
       appBar: AppBar(
         title: Text('Ride Requests',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            )),
+                  fontWeight: FontWeight.w700,
+                )),
         leading: const AppBackButton(),
         centerTitle: true,
         elevation: 0,
         backgroundColor: Colors.transparent,
       ),
-      body: _requests.isEmpty
-          ? Center(
+      body: requestsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        error: (error, stack) => Center(child: Text('Error: $error')),
+        data: (requests) {
+          if (requests.isEmpty) {
+            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -96,7 +92,8 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                       shape: BoxShape.circle,
                     ),
                     child: Icon(Icons.check_circle_outline_rounded,
-                        size: 80, color: AppColors.primary.withValues(alpha: 0.8)),
+                        size: 80,
+                        color: AppColors.primary.withValues(alpha: 0.8)),
                   ),
                   const SizedBox(height: 24),
                   Text(
@@ -120,12 +117,15 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                   ),
                 ],
               ),
-            )
-          : Column(
+            );
+          }
+
+          return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   child: Row(
                     children: [
                       Text(
@@ -138,13 +138,14 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                       ),
                       const Spacer(),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: AppColors.primary.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          '${_requests.length} pending',
+                          '${requests.length} pending',
                           style: GoogleFonts.inter(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w600,
@@ -158,7 +159,7 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: () async {
-                      await Future.delayed(const Duration(seconds: 1));
+                      // refresh handled automatically by stream
                     },
                     color: AppColors.primary,
                     child: AnimationLimiter(
@@ -166,9 +167,9 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                         padding: const EdgeInsets.all(16),
                         physics: const BouncingScrollPhysics(
                             parent: AlwaysScrollableScrollPhysics()),
-                        itemCount: _requests.length,
+                        itemCount: requests.length,
                         itemBuilder: (context, index) {
-                          final req = _requests[index];
+                          final req = requests[index];
                           return AnimationConfiguration.staggeredList(
                             position: index,
                             duration: const Duration(milliseconds: 400),
@@ -176,17 +177,17 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                               verticalOffset: 50.0,
                               child: FadeInAnimation(
                                 child: _RequestCard(
-                                  name: req['name'],
-                                  rating: req['rating'],
-                                  pickup: req['pickup'],
-                                  pickupDist: req['pickup_dist'],
-                                  drop: req['drop'],
-                                  dropDist: req['drop_dist'],
-                                  time: req['time'],
-                                  price: req['price'],
+                                  name: req.riderName,
+                                  rating: req.riderRating,
+                                  pickup: req.pickupLocation,
+                                  pickupDist: req.pickupDistance.isNotEmpty ? req.pickupDistance : 'Nearby',
+                                  drop: req.dropLocation,
+                                  dropDist: req.dropDistance.isNotEmpty ? req.dropDistance : 'On route',
+                                  time: req.estimatedTime.isNotEmpty ? req.estimatedTime : '5 min',
+                                  price: req.price,
                                   isDark: isDark,
-                                  onAccept: () => _handleRequest(index, true),
-                                  onDecline: () => _handleRequest(index, false),
+                                  onAccept: () => _handleRequest(req, true),
+                                  onDecline: () => _handleRequest(req, false),
                                 ),
                               ),
                             ),
@@ -197,7 +198,9 @@ class _RequestManagementScreenState extends ConsumerState<RequestManagementScree
                   ),
                 ),
               ],
-            ),
+            );
+        },
+      ),
     );
   }
 }
@@ -258,7 +261,9 @@ class _RequestCard extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 2),
+                  border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.3),
+                      width: 2),
                 ),
                 child: CircleAvatar(
                   radius: 22,
@@ -303,7 +308,8 @@ class _RequestCard extends StatelessWidget {
               // However, the rider is offering to pay the driver's asking price. Let's show "Agreed: ₹x" or just show the price as standard expectation.
               // I'll show it as a chip indicating it conforms to driver's posted price.
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
@@ -319,7 +325,7 @@ class _RequestCard extends StatelessWidget {
               ),
             ],
           ),
-          
+
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Divider(height: 1),
@@ -415,9 +421,9 @@ class _RequestCard extends StatelessWidget {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 20),
-          
+
           // Action Buttons
           Row(
             children: [
@@ -432,7 +438,8 @@ class _RequestCard extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: Text('Decline', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  child: Text('Decline',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -446,7 +453,8 @@ class _RequestCard extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: Text('Accept Rider', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  child: Text('Accept Rider',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                 ),
               ),
             ],

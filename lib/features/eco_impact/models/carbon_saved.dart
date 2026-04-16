@@ -11,7 +11,7 @@ class CarbonSaved {
     required this.monthlyBreakdown,
   });
 
-  // Sample data for demo
+  // Sample data for demo (used as fallback)
   factory CarbonSaved.sample() {
     return const CarbonSaved(
       totalKg: 127.5,

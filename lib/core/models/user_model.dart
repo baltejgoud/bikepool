@@ -13,6 +13,11 @@ class UserModel {
   final String? verificationDetail1; // idNumber or companyName
   final String? verificationDetail2; // idType or companyEmail
   final String? verificationDetail3; // employeeId
+  final bool isDocumentUploaded;
+  final String? frontDocUrl;
+  final String? backDocUrl;
+  final bool isEmailVerificationSent;
+  final String? verificationStatus;
   final double rating;
   final int totalRides;
   final double walletBalance;
@@ -28,6 +33,11 @@ class UserModel {
     this.verificationDetail1,
     this.verificationDetail2,
     this.verificationDetail3,
+    this.isDocumentUploaded = false,
+    this.frontDocUrl,
+    this.backDocUrl,
+    this.isEmailVerificationSent = false,
+    this.verificationStatus,
     this.rating = 5.0,
     this.totalRides = 0,
     this.walletBalance = 0.0,
@@ -51,6 +61,11 @@ class UserModel {
       verificationDetail1: data['verificationDetail1'],
       verificationDetail2: data['verificationDetail2'],
       verificationDetail3: data['verificationDetail3'],
+      isDocumentUploaded: data['isDocumentUploaded'] ?? false,
+      frontDocUrl: data['frontDocUrl'],
+      backDocUrl: data['backDocUrl'],
+      isEmailVerificationSent: data['isEmailVerificationSent'] ?? false,
+      verificationStatus: data['verificationStatus'],
       rating: (data['rating'] ?? 5.0).toDouble(),
       totalRides: data['totalRides'] ?? 0,
       walletBalance: (data['walletBalance'] ?? 0.0).toDouble(),
@@ -68,6 +83,11 @@ class UserModel {
       'verificationDetail1': verificationDetail1,
       'verificationDetail2': verificationDetail2,
       'verificationDetail3': verificationDetail3,
+      'isDocumentUploaded': isDocumentUploaded,
+      'frontDocUrl': frontDocUrl,
+      'backDocUrl': backDocUrl,
+      'isEmailVerificationSent': isEmailVerificationSent,
+      'verificationStatus': verificationStatus,
       'rating': rating,
       'totalRides': totalRides,
       'walletBalance': walletBalance,
@@ -84,6 +104,11 @@ class UserModel {
     String? verificationDetail1,
     String? verificationDetail2,
     String? verificationDetail3,
+    bool? isDocumentUploaded,
+    String? frontDocUrl,
+    String? backDocUrl,
+    bool? isEmailVerificationSent,
+    String? verificationStatus,
     double? rating,
     int? totalRides,
     double? walletBalance,
@@ -99,6 +124,12 @@ class UserModel {
       verificationDetail1: verificationDetail1 ?? this.verificationDetail1,
       verificationDetail2: verificationDetail2 ?? this.verificationDetail2,
       verificationDetail3: verificationDetail3 ?? this.verificationDetail3,
+      isDocumentUploaded: isDocumentUploaded ?? this.isDocumentUploaded,
+      frontDocUrl: frontDocUrl ?? this.frontDocUrl,
+      backDocUrl: backDocUrl ?? this.backDocUrl,
+      isEmailVerificationSent:
+          isEmailVerificationSent ?? this.isEmailVerificationSent,
+      verificationStatus: verificationStatus ?? this.verificationStatus,
       rating: rating ?? this.rating,
       totalRides: totalRides ?? this.totalRides,
       walletBalance: walletBalance ?? this.walletBalance,

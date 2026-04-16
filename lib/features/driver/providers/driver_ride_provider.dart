@@ -79,6 +79,8 @@ class DriverRideState {
 class DriverRideNotifier extends StateNotifier<DriverRideState> {
   final Ref _ref;
   String? _currentRideId;
+  String? get currentRideId => _currentRideId;
+
   DriverRideNotifier(this._ref) : super(DriverRideState());
 
   Future<void> postRide({
@@ -102,7 +104,16 @@ class DriverRideNotifier extends StateNotifier<DriverRideState> {
     final userProfile = _ref.read(userProfileProvider).value;
     final user = authState.value;
 
-    if (user == null || userProfile == null) return;
+    print('--- [DriverRideNotifier.postRide] Starting ---');
+    if (user == null) {
+      print('ERROR: User is not authenticated.');
+      throw Exception('User is not authenticated.');
+    }
+    if (userProfile == null) {
+      print('ERROR: User profile not found.');
+      throw Exception('User profile not found. Please complete your profile.');
+    }
+    print('User UID: ${user.uid}, Profile Name: ${userProfile.fullName}');
 
     final originPoint = LatLngPoint(lat: originLat, lng: originLng);
     final destinationPoint =
@@ -131,11 +142,9 @@ class DriverRideNotifier extends StateNotifier<DriverRideState> {
       durationText: durationText,
     );
 
-    await _ref.read(rideRepositoryProvider).createRide(ride);
-
-    // Store the ride ID for location tracking (this is a simplified approach)
-    // In a real app, you'd get the actual document ID from Firestore
-    _currentRideId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+    print('Calling RideRepository.createRide()');
+    _currentRideId = await _ref.read(rideRepositoryProvider).createRide(ride);
+    print('--- [DriverRideNotifier.postRide] Ride created successfully with ID: $_currentRideId ---');
 
     state = DriverRideState(
       status: DriverRideStatus.findingRiders,
@@ -148,24 +157,58 @@ class DriverRideNotifier extends StateNotifier<DriverRideState> {
     );
   }
 
-  void acceptRider({
+  Future<void> acceptRider({
+    required String riderUid,
     required String name,
     required double rating,
     String? photo,
     required String pickup,
     required String drop,
-  }) {
-    state = state.copyWith(
-      status: DriverRideStatus.accepted,
-      riderName: name,
-      riderRating: rating,
-      riderPhoto: photo,
-      riderPickup: pickup,
-      riderDrop: drop,
-    );
+  }) async {
+    if (_currentRideId == null) return;
+
+    final success = await _ref
+        .read(rideRepositoryProvider)
+        .acceptRider(_currentRideId!, riderUid);
+    if (success) {
+      state = state.copyWith(
+        status: DriverRideStatus.accepted,
+        riderName: name,
+        riderRating: rating,
+        riderPhoto: photo,
+        riderPickup: pickup,
+        riderDrop: drop,
+      );
+    }
   }
 
-  void updateStatus(DriverRideStatus newStatus) {
+  Future<void> updateStatus(DriverRideStatus newStatus) async {
+    if (_currentRideId == null) return;
+
+    // Map DriverRideStatus to RideStatus for Firestore
+    RideStatus? firestoreStatus;
+    switch (newStatus) {
+      case DriverRideStatus.boarding:
+      case DriverRideStatus.enRoute:
+        firestoreStatus = RideStatus.ongoing;
+        break;
+      case DriverRideStatus.completed:
+        firestoreStatus = RideStatus.completed;
+        break;
+      case DriverRideStatus.cancelled:
+        firestoreStatus = RideStatus.cancelled;
+        break;
+      default:
+        // For other statuses, don't update Firestore
+        break;
+    }
+
+    if (firestoreStatus != null) {
+      await _ref
+          .read(rideRepositoryProvider)
+          .updateRideStatus(_currentRideId!, firestoreStatus);
+    }
+
     state = state.copyWith(status: newStatus);
   }
 
@@ -189,7 +232,11 @@ class DriverRideNotifier extends StateNotifier<DriverRideState> {
     }
   }
 
-  Future<void> cancelRide() async {
+  Future<void> cancelRide([String? rideId]) async {
+    final targetRideId = rideId ?? _currentRideId;
+    if (targetRideId != null) {
+      await _ref.read(rideRepositoryProvider).updateRideStatus(targetRideId, RideStatus.cancelled);
+    }
     await _ref.read(locationServiceProvider).stopLocationTracking();
     state = DriverRideState();
   }

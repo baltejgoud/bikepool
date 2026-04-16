@@ -7,6 +7,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_tokens.dart';
+import '../../core/providers/data_providers.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../shared/widgets/app_back_button.dart';
 import 'ride_booking_provider.dart';
 
@@ -47,19 +49,68 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
   void _startSimulation() {
     _simulationTimer?.cancel();
 
-    _simulationTimer = Timer(const Duration(seconds: 4), () {
+    _simulationTimer = Timer(const Duration(seconds: 2), () async {
       if (!mounted) return;
 
-      final ride = ref.read(rideBookingProvider).selectedRide;
-      if (ride == null) return;
+      final bookingState = ref.read(rideBookingProvider);
+      final rideId = bookingState.rideId;
+      final ride = bookingState.selectedRide;
 
-      ref.read(rideBookingProvider.notifier).confirmRide(
-            'RIDE_${DateTime.now().millisecondsSinceEpoch}',
+      if (ride == null || rideId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Booking failed: Invalid ride data')),
           );
+          context.goNamed('home');
+        }
+        return;
+      }
 
-      setState(() {
-        _phase = _BookingPhase.matched;
-      });
+      // Get current user
+      final authState = ref.read(authStateProvider);
+      final user = authState.value;
+      if (user == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('Booking failed: User not authenticated')),
+          );
+          context.goNamed('home');
+        }
+        return;
+      }
+
+      // Call the actual bookSeat function
+      final rideRepository = ref.read(rideRepositoryProvider);
+      try {
+        final bookingSuccess = await rideRepository.bookSeat(rideId, user.uid);
+
+        if (!mounted) return;
+
+        if (bookingSuccess) {
+          ref.read(rideBookingProvider.notifier).confirmRide(rideId);
+          setState(() {
+            _phase = _BookingPhase.matched;
+          });
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Booking failed: No available seats or ride not found'),
+            ),
+          );
+          ref.read(rideBookingProvider.notifier).reset();
+          context.goNamed('home');
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Booking error: ${e.toString()}')),
+          );
+          ref.read(rideBookingProvider.notifier).reset();
+          context.goNamed('home');
+        }
+      }
     });
   }
 

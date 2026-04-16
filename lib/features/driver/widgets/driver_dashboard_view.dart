@@ -8,6 +8,7 @@ import '../../../core/models/ride_model.dart';
 import '../../../core/providers/data_providers.dart';
 import '../../../shared/widgets/vehicle_card.dart';
 import '../../../shared/widgets/app_pill.dart';
+import '../providers/driver_ride_provider.dart';
 
 class DriverDashboardView extends ConsumerWidget {
   const DriverDashboardView({super.key});
@@ -16,7 +17,7 @@ class DriverDashboardView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ridesAsync = ref.watch(myRidesAsDriverProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFF5F5F4);
+    final bgColor = isDark ? const Color(0xFF141414) : const Color(0xFFF7F7F9);
 
     return ridesAsync.when(
       data: (rides) {
@@ -36,8 +37,8 @@ class DriverDashboardView extends ConsumerWidget {
               padding: const EdgeInsets.only(
                 left: 16.0,
                 right: 16.0,
-                bottom: 100.0,
-                top: 16.0,
+                bottom: 120.0,
+                top: 8.0,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,7 +48,7 @@ class DriverDashboardView extends ConsumerWidget {
                   const SizedBox(height: 24),
                   _buildQuickActions(context, isDark),
                   const SizedBox(height: 32),
-                  _buildActiveRideSectionFromModel(context, isDark, activeRide),
+                  _buildActiveRideSectionFromModel(context, ref, isDark, activeRide),
                 ],
               ),
             ),
@@ -55,95 +56,97 @@ class DriverDashboardView extends ConsumerWidget {
         );
       },
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, s) => const Center(child: Text('Error loading dashboard')),
+      error: (e, s) => Center(
+        child: Text(
+          'Error loading dashboard:\n$e',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+        ),
+      ),
     );
   }
 
   Widget _buildActiveRideSectionFromModel(
     BuildContext context,
+    WidgetRef ref,
     bool isDark,
     RideModel? activeRide,
   ) {
     if (activeRide == null) {
       return _buildNoActiveRideSection(context, isDark);
     }
-
-    // Map RideModel to what the UI expects or update UI to use RideModel
-    // For now, I'll update the helper to take RideModel
-    return _buildActiveRideDetails(context, isDark, activeRide);
+    return _buildActiveRideDetails(context, ref, isDark, activeRide);
   }
 
   Widget _buildNoActiveRideSection(BuildContext context, bool isDark) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(28),
         boxShadow: AppColors.softElevation(
           isDark: isDark,
           highContrast: false,
-          strength: 0.95,
+          strength: 0.8,
         ),
         border: Border.all(
-          color: AppColors.softStroke(
-            isDark: isDark,
-            highContrast: false,
-            tint: AppColors.primary,
-            strength: 1.1,
-          ),
+          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04),
         ),
       ),
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
+              color: AppColors.primary.withValues(alpha: isDark ? 0.15 : 0.08),
               shape: BoxShape.circle,
             ),
             child: const Icon(
               Icons.directions_car_rounded,
-              size: 32,
+              size: 40,
               color: AppColors.primary,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
           Text(
-            'No active rides',
+            'Ready to earn?',
             style: GoogleFonts.outfit(
-              fontSize: 20,
+              fontSize: 22,
               fontWeight: FontWeight.w700,
               color: isDark ? Colors.white : Colors.black87,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            'Post a ride to start sharing seats and earning.',
+            'Offer an empty seat on your next trip to share costs and meet great people.',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
-              fontSize: 14,
-              color: isDark ? Colors.white70 : Colors.black54,
+              fontSize: 15,
+              height: 1.5,
+              color: isDark ? Colors.white60 : Colors.black54,
             ),
           ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: () => context.pushNamed('offer-ride'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 32,
-                vertical: 12,
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => context.pushNamed('offer-ride'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                elevation: 0,
               ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            child: Text(
-              'Post a Ride',
-              style: GoogleFonts.inter(
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
+              child: Text(
+                'Post a Ride Now',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
@@ -154,213 +157,265 @@ class DriverDashboardView extends ConsumerWidget {
 
   Widget _buildActiveRideDetails(
     BuildContext context,
+    WidgetRef ref,
     bool isDark,
     RideModel ride,
   ) {
-    // Current stage based on RideStatus
     final currentStage = ride.status == RideStatus.active ? 0 : 1;
     final isFindingRiders = ride.status == RideStatus.active;
     final primaryText = isDark ? Colors.white : Colors.black87;
     final secondaryText = isDark ? Colors.white70 : Colors.black54;
-    final panelColor =
-        isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF7F4EE);
 
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: isDark ? AppColors.cardDark : Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(32),
         boxShadow: AppColors.softElevation(
           isDark: isDark,
           highContrast: false,
-          strength: 1.0,
+          strength: 1.2,
         ),
         border: Border.all(
-          color: AppColors.softStroke(
-            isDark: isDark,
-            highContrast: false,
-          ),
+          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header section
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 14),
-                      AppPill(
-                        label: isFindingRiders
-                            ? 'FINDING RIDERS'
-                            : 'RIDE IN PROGRESS',
-                        icon: isFindingRiders
-                            ? Icons.radar_rounded
-                            : Icons.check_circle_outline_rounded,
-                        pillContext: isFindingRiders
-                            ? AppPillContext.warning
-                            : AppPillContext.success,
-                        style: AppPillStyle.soft,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    AppPill(
+                      label: isFindingRiders ? 'FINDING RIDERS' : 'RIDE IN PROGRESS',
+                      icon: isFindingRiders ? Icons.radar_rounded : Icons.check_circle_outline_rounded,
+                      pillContext: isFindingRiders ? AppPillContext.warning : AppPillContext.success,
+                      style: AppPillStyle.filled,
+                    ),
+                    Text(
+                      '\u20B9${ride.price.toStringAsFixed(0)}',
+                      style: GoogleFonts.outfit(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.primary,
                       ),
-                      const SizedBox(height: 14),
-                      Text(
-                        isFindingRiders ? 'Posted ride' : 'Active trip summary',
-                        style: GoogleFonts.outfit(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          color: primaryText,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Your route is live and visible to nearby riders.',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          height: 1.4,
-                          color: secondaryText,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(height: 20),
                 Text(
-                  '\u20B9${ride.price.toStringAsFixed(0)}',
+                  isFindingRiders ? 'Your ride is live!' : 'Currently on route',
                   style: GoogleFonts.outfit(
                     fontSize: 26,
                     fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
+                    letterSpacing: -0.5,
+                    color: primaryText,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Matching with nearby riders traveling this route.',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: secondaryText,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            _buildStageTimeline(isDark: isDark, currentStage: currentStage),
-            const SizedBox(height: 20),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: panelColor,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white10
-                      : AppColors.primary.withValues(alpha: 0.08),
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
+          ),
+          
+          Divider(height: 1, color: isDark ? Colors.white10 : Colors.grey.shade200),
+          
+          // Timeline & Stage
+          Container(
+            color: isDark ? Colors.white.withValues(alpha: 0.02) : const Color(0xFFFAFAFA),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildStageTimeline(isDark: isDark, currentStage: currentStage),
+                const SizedBox(height: 32),
+                
+                // Elegant Route Display
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildRouteNode(outlined: true, color: AppColors.primary),
-                      Container(
-                        width: 2,
-                        height: 28,
-                        color: isDark ? Colors.white24 : Colors.black12,
+                      Column(
+                        children: [
+                          const SizedBox(height: 4),
+                          _buildRouteNode(outlined: true, color: AppColors.primary),
+                          Expanded(
+                            child: Container(
+                              width: 2,
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isDark ? Colors.white24 : Colors.grey.shade300,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                          _buildRouteNode(outlined: false, color: AppColors.secondary),
+                          const SizedBox(height: 20), // Offset for the bottom text
+                        ],
                       ),
-                      _buildRouteNode(
-                        outlined: false,
-                        color: AppColors.secondary,
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildRouteStop(
+                              label: 'Pickup',
+                              value: ride.originAddress,
+                              textColor: primaryText,
+                              secondaryText: secondaryText,
+                            ),
+                            const SizedBox(height: 24),
+                            _buildRouteStop(
+                              label: 'Drop-off',
+                              value: ride.destinationAddress,
+                              textColor: primaryText,
+                              secondaryText: secondaryText,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildRouteStop(
-                          label: 'Pickup',
-                          value: ride.originAddress,
-                          textColor: primaryText,
-                          secondaryTextColor: secondaryText,
-                        ),
-                        const SizedBox(height: 18),
-                        _buildRouteStop(
-                          label: 'Drop-off',
-                          value: ride.destinationAddress,
-                          textColor: primaryText,
-                          secondaryTextColor: secondaryText,
-                        ),
-                      ],
+                ),
+              ],
+            ),
+          ),
+
+          Divider(height: 1, color: isDark ? Colors.white10 : Colors.grey.shade200),
+
+          // Actions & Details Bottom
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildDetailTile(
+                        icon: Icons.event_seat_rounded,
+                        label: '${ride.availableSeats} of ${ride.totalSeats} seats',
+                        isDark: isDark,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildDetailTile(
+                        icon: ride.vehicleType == VehicleType.bike
+                            ? Icons.two_wheeler_rounded
+                            : Icons.directions_car_filled_rounded,
+                        label: ride.vehicleType == VehicleType.bike ? 'Bike trip' : 'Car trip',
+                        isDark: isDark,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => context.pushNamed('request-management'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isDark ? Colors.white : Colors.black,
+                      foregroundColor: isDark ? Colors.black : Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      'Manage Ride & Requests',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
-                ],
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      await ref.read(driverRideProvider.notifier).cancelRide(ride.id);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Text('Ride cancelled successfully'),
+                            backgroundColor: AppColors.primary,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        );
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.redAccent,
+                      side: const BorderSide(color: Colors.redAccent),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                    ),
+                    child: Text(
+                      'Cancel Ride',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailTile({
+    required IconData icon,
+    required String label,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: isDark ? Colors.white70 : Colors.black54),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                const AppPill(
-                  label: 'Today',
-                  icon: Icons.schedule_rounded,
-                  pillContext: AppPillContext.neutral,
-                  style: AppPillStyle.soft,
-                ),
-                AppPill(
-                  label: '${ride.totalSeats} seats total',
-                  icon: Icons.event_seat_rounded,
-                  pillContext: AppPillContext.neutral,
-                  style: AppPillStyle.soft,
-                ),
-                AppPill(
-                  label: ride.vehicleType == VehicleType.bike
-                      ? 'Bike ride'
-                      : 'Car ride',
-                  icon: ride.vehicleType == VehicleType.bike
-                      ? Icons.two_wheeler_rounded
-                      : Icons.directions_car_filled_rounded,
-                  pillContext: AppPillContext.neutral,
-                  style: AppPillStyle.soft,
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Requests and rider matches will show up in Management.',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      height: 1.4,
-                      color: secondaryText,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton(
-                  onPressed: () => context.pushNamed('request-management'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 14,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    elevation: 0,
-                  ),
-                  child: Text(
-                    'Manage Ride',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -371,70 +426,72 @@ class DriverDashboardView extends ConsumerWidget {
     bool hasActiveRide,
   ) {
     return Container(
-      height: 140,
+      height: 180,
       width: double.infinity,
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: AppColors.softStroke(
-            isDark: isDark,
-            highContrast: false,
-            tint: AppColors.primary,
-            strength: 1.05,
-          ),
+          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.04),
         ),
         boxShadow: AppColors.softElevation(
           isDark: isDark,
           highContrast: false,
-          strength: 0.95,
+          strength: 0.8,
         ),
         image: const DecorationImage(
           image: NetworkImage(
-            'https://maps.googleapis.com/maps/api/staticmap?center=Hyderabad&zoom=12&size=600x300&maptype=roadmap&style=feature:all|element:labels.text.fill|color:0x9e9e9e&style=feature:all|element:labels.text.stroke|visibility:off&style=feature:administrative.locality|element:labels.text.fill|color:0x707070&style=feature:administrative.neighborhood|element:labels.text.fill|color:0x707070&style=feature:landscape|element:geometry.fill|color:0xf5f5f2&style=feature:poi|element:geometry.fill|color:0xdce0d9&style=feature:poi.park|element:geometry.fill|color:0xc8d7d4&style=feature:road|element:geometry.fill|color:0xffffff&style=feature:road|element:labels.icon|visibility:off&style=feature:transit|element:geometry.fill|color:0xe5e5e5&style=feature:water|element:geometry.fill|color:0xa3ccff',
+            'https://maps.googleapis.com/maps/api/staticmap?center=Hyderabad&zoom=12&size=600x300&maptype=roadmap&style=feature:all|element:labels.text.fill|color:0x9e9e9e&style=feature:all|element:labels.text.stroke|visibility:off&style=feature:administrative.locality|element:labels.text.fill|color:0x707070&style=feature:administrative.neighborhood|element:labels.text.fill|color:0x707070&style=feature:road|element:geometry.fill|color:0xffffff&style=feature:road|element:labels.icon|visibility:off',
           ),
           fit: BoxFit.cover,
-          opacity: 0.6,
         ),
       ),
       child: Stack(
         children: [
           Container(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(28),
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  (isDark ? Colors.black : Colors.white).withValues(alpha: 0.6),
+                  (isDark ? Colors.black : Colors.black).withValues(alpha: isDark ? 0.8 : 0.4),
                 ],
               ),
             ),
           ),
           Positioned(
-            bottom: 16,
-            left: 16,
+            bottom: 20,
+            left: 20,
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
                     color: AppColors.primary,
                     shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                        spreadRadius: 2,
+                      )
+                    ],
                   ),
                   child: const Icon(
                     Icons.my_location_rounded,
                     color: Colors.white,
-                    size: 16,
+                    size: 18,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 Text(
-                  hasActiveRide ? 'Active ride tracking...' : 'You are online',
+                  hasActiveRide ? 'Tracking via GPS...' : 'Online \u2022 Waiting for rides',
                   style: GoogleFonts.inter(
+                    fontSize: 15,
                     fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: Colors.white,
                   ),
                 ),
               ],
@@ -460,7 +517,7 @@ class DriverDashboardView extends ConsumerWidget {
             onTap: () => context.pushNamed('offer-ride'),
             isPrimary: true,
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           _buildActionItem(
             context: context,
             title: 'Ride Requests',
@@ -469,7 +526,7 @@ class DriverDashboardView extends ConsumerWidget {
             isDark: isDark,
             onTap: () => context.pushNamed('request-management'),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
           _buildActionItem(
             context: context,
             title: 'Go Offline',
@@ -495,7 +552,7 @@ class DriverDashboardView extends ConsumerWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         decoration: BoxDecoration(
           gradient: isPrimary
               ? LinearGradient(
@@ -511,26 +568,25 @@ class DriverDashboardView extends ConsumerWidget {
           border: Border.all(
             color: isPrimary
                 ? Colors.transparent
-                : AppColors.softStroke(
-                    isDark: isDark,
-                    highContrast: false,
-                  ),
+                : isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
           ),
-          boxShadow: AppColors.softElevation(
-            isDark: isDark,
-            highContrast: false,
-            tint: isPrimary ? color : null,
-            strength: isPrimary ? 0.95 : 0.8,
-          ),
+          boxShadow: isPrimary
+              ? AppColors.softElevation(
+                  isDark: isDark,
+                  highContrast: false,
+                  tint: color,
+                  strength: 1.0,
+                )
+              : null,
         ),
         child: Row(
           children: [
-            Icon(icon, color: isPrimary ? Colors.white : color, size: 20),
+            Icon(icon, color: isPrimary ? Colors.white : color, size: 22),
             const SizedBox(width: 8),
             Text(
               title,
               style: GoogleFonts.inter(
-                fontSize: 14,
+                fontSize: 15,
                 fontWeight: FontWeight.w700,
                 color: isPrimary
                     ? Colors.white
@@ -550,44 +606,52 @@ class DriverDashboardView extends ConsumerWidget {
     const stages = ['Posted', 'Matched', 'On trip'];
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: List.generate(stages.length, (index) {
         final isComplete = index <= currentStage;
         final isLast = index == stages.length - 1;
 
         return Expanded(
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 28,
-                height: 28,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   color: isComplete
                       ? AppColors.primary
                       : (isDark
                           ? Colors.white.withValues(alpha: 0.08)
-                          : const Color(0xFFF0ECE4)),
+                          : const Color(0xFFEDEEF2)),
                   shape: BoxShape.circle,
+                  border: isComplete ? Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 4) : null,
                 ),
-                child: Icon(
-                  isComplete ? Icons.check_rounded : Icons.circle_outlined,
-                  size: isComplete ? 16 : 14,
-                  color: isComplete
-                      ? Colors.white
-                      : (isDark ? Colors.white54 : Colors.black38),
+                child: Center(
+                  child: Icon(
+                    isComplete ? Icons.check_rounded : Icons.fiber_manual_record,
+                    size: isComplete ? 16 : 8,
+                    color: isComplete
+                        ? Colors.white
+                        : (isDark ? Colors.white30 : Colors.black26),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       stages[index],
                       style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : Colors.black87,
+                        fontSize: 13,
+                        fontWeight: isComplete ? FontWeight.w700 : FontWeight.w600,
+                        color: isComplete ? (isDark ? Colors.white : Colors.black87) : (isDark ? Colors.white54 : Colors.black54),
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (!isLast)
                       Container(
@@ -598,7 +662,7 @@ class DriverDashboardView extends ConsumerWidget {
                               ? AppColors.primary
                               : (isDark
                                   ? Colors.white12
-                                  : Colors.black.withValues(alpha: 0.08)),
+                                  : Colors.black.withValues(alpha: 0.06)),
                           borderRadius: BorderRadius.circular(99),
                         ),
                       ),
@@ -617,12 +681,19 @@ class DriverDashboardView extends ConsumerWidget {
     required Color color,
   }) {
     return Container(
-      width: 12,
-      height: 12,
+      width: 16,
+      height: 16,
       decoration: BoxDecoration(
         color: outlined ? Colors.white : color,
-        border: outlined ? Border.all(color: color, width: 2) : null,
+        border: outlined ? Border.all(color: color, width: 4) : null,
         shape: BoxShape.circle,
+        boxShadow: outlined ? null : [
+          BoxShadow(
+            color: color.withValues(alpha: 0.4),
+            blurRadius: 4,
+            spreadRadius: 1,
+          )
+        ],
       ),
     );
   }
@@ -631,7 +702,7 @@ class DriverDashboardView extends ConsumerWidget {
     required String label,
     required String value,
     required Color textColor,
-    required Color secondaryTextColor,
+    required Color secondaryText,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -639,23 +710,26 @@ class DriverDashboardView extends ConsumerWidget {
         Text(
           label,
           style: GoogleFonts.inter(
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: secondaryTextColor,
+            color: secondaryText,
+            letterSpacing: 0.5,
           ),
         ),
         const SizedBox(height: 6),
         Text(
           value,
-          maxLines: 1,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.inter(
-            fontSize: 16,
+            fontSize: 18,
             fontWeight: FontWeight.w700,
             color: textColor,
+            height: 1.3,
           ),
         ),
       ],
     );
   }
 }
+

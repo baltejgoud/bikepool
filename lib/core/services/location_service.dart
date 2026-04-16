@@ -17,9 +17,8 @@ class LocationServiceException implements Exception {
 class LocationService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   StreamSubscription<Position>? _positionStream;
-  Timer? _locationUpdateTimer;
 
-  /// Check if location services are enabled and permissions are granted
+  /// Check if location services are enabled and permissions are granted.
   Future<bool> checkLocationPermissions() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) return false;
@@ -35,123 +34,104 @@ class LocationService {
     return true;
   }
 
-  /// Get current position
+  /// Get the current device position. Throws [LocationServiceException] on failure.
   Future<Position?> getCurrentPosition() async {
     try {
       return await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
     } catch (e) {
-      throw LocationServiceException('Failed to get current position. Please enable location services.', e);
+      throw LocationServiceException(
+        'Failed to get current position. Please enable location services.',
+        e,
+      );
     }
   }
 
-  /// Start tracking location for a driver during a ride
+  /// Start tracking the driver's location for a given ride.
+  ///
+  /// Uses a single distance-filtered position stream instead of the previous
+  /// redundant combination of a [Timer] and a stream. Each new position triggers
+  /// one consolidated Firestore write to the ride document, cutting write costs
+  /// by ~67 % compared to the old three-collection fan-out.
   Future<void> startLocationTracking(String rideId, String driverUid) async {
-    // Stop any existing tracking
+    // Cancel any previous session first.
     await stopLocationTracking();
 
-    // Check permissions
     if (!await checkLocationPermissions()) {
-      throw LocationServiceException('Location permissions are required to track rides.');
+      throw LocationServiceException(
+        'Location permissions are required to track rides.',
+      );
     }
 
-    // Start periodic location updates (every 10 seconds)
-    _locationUpdateTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (timer) async {
-        try {
-          final position = await getCurrentPosition();
-          if (position != null) {
-            await _updateDriverLocation(rideId, driverUid, position);
-          }
-        } catch (e) {
-          // Log error but don't crash the timer
-          dev.log('Background location update failed: $e', name: 'LocationService', error: e);
-        }
-      },
-    );
-
-    // Also listen to position changes for more responsive updates
     _positionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Update when moved 10 meters
+        distanceFilter: 10, // update only after moving ≥10 m
       ),
-    ).listen((Position position) async {
-      try {
-        await _updateDriverLocation(rideId, driverUid, position);
-      } catch (e) {
-        dev.log('Background location stream failed: $e', name: 'LocationService', error: e);
-      }
-    });
+    ).listen(
+      (Position position) async {
+        try {
+          await _updateDriverLocation(rideId, driverUid, position);
+        } catch (e) {
+          dev.log(
+            'Location update failed: $e',
+            name: 'LocationService',
+            error: e,
+          );
+        }
+      },
+      onError: (Object e) {
+        dev.log(
+          'Position stream error: $e',
+          name: 'LocationService',
+          error: e,
+        );
+      },
+    );
   }
 
-  /// Stop location tracking
+  /// Stop location tracking and cancel any active subscriptions.
   Future<void> stopLocationTracking() async {
-    _positionStream?.cancel();
+    await _positionStream?.cancel();
     _positionStream = null;
-    _locationUpdateTimer?.cancel();
-    _locationUpdateTimer = null;
   }
 
-  /// Update driver's current location in Firestore
+  /// Single consolidated Firestore write per location update.
+  ///
+  /// Writes only to the ride document. The previous implementation fanned out
+  /// to three separate collections on every update, which tripled costs and
+  /// write amplification. Consumers should read location data from the ride
+  /// document via [getDriverLocation].
   Future<void> _updateDriverLocation(
-      String rideId, String driverUid, Position position) async {
-    final locationData = {
-      'rideId': rideId,
-      'driverUid': driverUid,
-      'latitude': position.latitude,
-      'longitude': position.longitude,
-      'accuracy': position.accuracy,
-      'speed': position.speed,
-      'heading': position.heading,
-      'timestamp': FieldValue.serverTimestamp(),
-    };
-
-    // Store in a subcollection under the ride document
-    await _firestore
-        .collection('rides')
-        .doc(rideId)
-        .collection('driverLocation')
-        .doc('current')
-        .set(locationData);
-
-    // Also update the ride document with current location
+    String rideId,
+    String driverUid,
+    Position position,
+  ) async {
     await _firestore.collection('rides').doc(rideId).update({
       'currentDriverLat': position.latitude,
       'currentDriverLng': position.longitude,
       'lastLocationUpdate': FieldValue.serverTimestamp(),
     });
-
-    // Also store in a separate collection for easier querying
-    await _firestore
-        .collection('driverLocations')
-        .doc('${rideId}_$driverUid')
-        .set(locationData);
   }
 
-  /// Get driver's current location for a ride
+  /// Stream the driver's current location from the ride document.
   Stream<LatLngPoint?> getDriverLocation(String rideId) {
     return _firestore
         .collection('rides')
         .doc(rideId)
-        .collection('driverLocation')
-        .doc('current')
         .snapshots()
         .map((doc) {
-      if (doc.exists && doc.data() != null) {
-        final data = doc.data()!;
-        return LatLngPoint(
-          lat: data['latitude'] ?? 0.0,
-          lng: data['longitude'] ?? 0.0,
-        );
-      }
-      return null;
+      if (!doc.exists || doc.data() == null) return null;
+      final data = doc.data()!;
+      final lat = (data['currentDriverLat'] as num?)?.toDouble();
+      final lng = (data['currentDriverLng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
+      return LatLngPoint(lat: lat, lng: lng);
     });
   }
 
-  /// Get driver's location history for a ride (last 24 hours)
+  /// Get the driver's location history for a ride over the last 24 hours.
   Stream<List<LatLngPoint>> getDriverLocationHistory(String rideId) {
     final yesterday = DateTime.now().subtract(const Duration(days: 1));
 
@@ -161,14 +141,12 @@ class LocationService {
         .where('timestamp', isGreaterThan: yesterday)
         .orderBy('timestamp', descending: true)
         .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        return LatLngPoint(
-          lat: data['latitude'] ?? 0.0,
-          lng: data['longitude'] ?? 0.0,
-        );
-      }).toList();
-    });
+        .map((snapshot) => snapshot.docs.map((doc) {
+              final data = doc.data();
+              return LatLngPoint(
+                lat: (data['latitude'] as num?)?.toDouble() ?? 0.0,
+                lng: (data['longitude'] as num?)?.toDouble() ?? 0.0,
+              );
+            }).toList());
   }
 }

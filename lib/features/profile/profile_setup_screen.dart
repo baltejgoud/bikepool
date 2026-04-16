@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme/app_colors.dart';
 import 'providers/profile_setup_provider.dart';
@@ -21,9 +23,13 @@ class ProfileSetupScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
-  late int _currentStep;
   final _personalFormKey = GlobalKey<FormState>();
   final _verificationFormKey = GlobalKey<FormState>();
+  final _picker = ImagePicker();
+
+  // Loading state for individual image pickers (local only – not in provider)
+  bool _isPickingFront = false;
+  bool _isPickingBack = false;
 
   late final TextEditingController _fullNameController;
   late final TextEditingController _phoneController;
@@ -41,19 +47,22 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   void initState() {
     super.initState();
     final profile = ref.read(profileSetupProvider);
-    _currentStep = widget.initialStep.clamp(0, 3).toInt();
     _fullNameController = TextEditingController(text: profile.fullName);
     _phoneController = TextEditingController(text: profile.phoneNumber);
-    _emergencyController =
-        TextEditingController(text: profile.emergencyContact);
+    _emergencyController = TextEditingController(text: profile.emergencyContact);
     _homeHubController = TextEditingController(text: profile.homeHub);
-    _governmentIdController =
-        TextEditingController(text: profile.governmentIdNumber);
+    _governmentIdController = TextEditingController(text: profile.governmentIdNumber);
     _companyNameController = TextEditingController(text: profile.companyName);
     _companyEmailController = TextEditingController(text: profile.companyEmail);
     _employeeIdController = TextEditingController(text: profile.employeeId);
     if (profile.governmentIdType.isNotEmpty) {
       _selectedGovernmentIdType = profile.governmentIdType;
+    }
+
+    if (profile.currentStep == 0 && widget.initialStep > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(profileSetupProvider.notifier).setStep(widget.initialStep.clamp(0, 3));
+      });
     }
   }
 
@@ -70,64 +79,126 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     super.dispose();
   }
 
-  Future<void> _goNext(ProfileSetupState profile) async {
-    if (_currentStep == 0) {
-      if (!_personalFormKey.currentState!.validate()) {
-        return;
+  // ---------------------------------------------------------------------------
+  // Image picking
+  // ---------------------------------------------------------------------------
+
+  Future<void> _pickFrontImage() async {
+    if (_isPickingFront) return;
+    // Save ID details before opening picker so state is consistent
+    if (!(_verificationFormKey.currentState?.validate() ?? false)) return;
+    ref.read(profileSetupProvider.notifier).saveGovernmentVerification(
+          idType: _selectedGovernmentIdType,
+          idNumber: _governmentIdController.text,
+        );
+
+    setState(() => _isPickingFront = true);
+    try {
+      final xFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1200,
+      );
+      if (xFile != null && mounted) {
+        final bytes = await xFile.readAsBytes();
+        ref.read(profileSetupProvider.notifier).setFrontImage(bytes, xFile.name);
       }
+    } catch (e) {
+      if (mounted) _showMessage('Could not open image picker: $e');
+    } finally {
+      if (mounted) setState(() => _isPickingFront = false);
+    }
+  }
+
+  Future<void> _pickBackImage() async {
+    if (_isPickingBack) return;
+    if (!(_verificationFormKey.currentState?.validate() ?? false)) return;
+    ref.read(profileSetupProvider.notifier).saveGovernmentVerification(
+          idType: _selectedGovernmentIdType,
+          idNumber: _governmentIdController.text,
+        );
+
+    setState(() => _isPickingBack = true);
+    try {
+      final xFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1200,
+      );
+      if (xFile != null && mounted) {
+        final bytes = await xFile.readAsBytes();
+        ref.read(profileSetupProvider.notifier).setBackImage(bytes, xFile.name);
+      }
+    } catch (e) {
+      if (mounted) _showMessage('Could not open image picker: $e');
+    } finally {
+      if (mounted) setState(() => _isPickingBack = false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Navigation
+  // ---------------------------------------------------------------------------
+
+  Future<void> _goNext(ProfileSetupState profile) async {
+    final currentStep = profile.currentStep;
+
+    if (currentStep == 0) {
+      if (!_personalFormKey.currentState!.validate()) return;
       ref.read(profileSetupProvider.notifier).savePersonalDetails(
             fullName: _fullNameController.text,
             emergencyContact: _emergencyController.text,
             homeHub: _homeHubController.text,
           );
-      setState(() => _currentStep = 1);
+      ref.read(profileSetupProvider.notifier).nextStep();
       return;
     }
 
-    if (_currentStep == 1) {
+    if (currentStep == 1) {
       if (!profile.hasVerificationChoice) {
         _showMessage('Choose a verification method to continue.');
         return;
       }
-      setState(() => _currentStep = 2);
+      ref.read(profileSetupProvider.notifier).nextStep();
       return;
     }
 
-    if (_currentStep == 2) {
-      if (!_verificationFormKey.currentState!.validate()) {
-        return;
-      }
-
-      if (profile.verificationMethod == VerificationMethod.governmentId && !profile.isDocumentUploaded) {
-        _showMessage('Please upload your document first.');
-        return;
-      }
-      if (profile.verificationMethod == VerificationMethod.companyId && !profile.isEmailVerificationSent) {
-        _showMessage('Please send the verification link first.');
-        return;
-      }
+    if (currentStep == 2) {
+      if (!_verificationFormKey.currentState!.validate()) return;
 
       if (profile.verificationMethod == VerificationMethod.governmentId) {
+        if (!profile.isFrontUploaded || !profile.isBackUploaded) {
+          _showMessage(
+            !profile.isFrontUploaded && !profile.isBackUploaded
+                ? 'Please add both sides of your document.'
+                : !profile.isFrontUploaded
+                    ? 'Please add the front side of your document.'
+                    : 'Please add the back side of your document.',
+          );
+          return;
+        }
         ref.read(profileSetupProvider.notifier).saveGovernmentVerification(
               idType: _selectedGovernmentIdType,
               idNumber: _governmentIdController.text,
             );
       } else {
+        if (!profile.isEmailVerificationSent) {
+          _showMessage('Please send the verification link first.');
+          return;
+        }
         ref.read(profileSetupProvider.notifier).saveCompanyVerification(
               companyName: _companyNameController.text,
               companyEmail: _companyEmailController.text,
               employeeId: _employeeIdController.text,
             );
       }
-      setState(() => _currentStep = 3);
+      ref.read(profileSetupProvider.notifier).nextStep();
       return;
     }
 
-    // Final step: Save to Firestore
+    // Final step
     final success = await ref.read(profileSetupProvider.notifier).markProfileCompleted();
-    
     if (!mounted) return;
-
     if (success) {
       if (widget.returnToProfile) {
         context.go('/home/profile');
@@ -140,8 +211,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     }
   }
 
-  void _goBack() {
-    if (_currentStep == 0) {
+  void _goBack(int currentStep) {
+    if (currentStep == 0) {
       if (widget.returnToProfile) {
         context.pop();
       } else {
@@ -149,7 +220,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       }
       return;
     }
-    setState(() => _currentStep -= 1);
+    ref.read(profileSetupProvider.notifier).previousStep();
   }
 
   void _showMessage(String message) {
@@ -161,20 +232,24 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(profileSetupProvider);
+    final currentStep = profile.currentStep;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final progress = (_currentStep + 1) / 4;
+    final progress = (currentStep + 1) / 4;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? const Color(0xFF0F1412) : const Color(0xFFF7F6F1),
+      backgroundColor: isDark ? const Color(0xFF0F1412) : const Color(0xFFF7F6F1),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          onPressed: _goBack,
+          onPressed: () => _goBack(currentStep),
           icon: Icon(
             Icons.arrow_back_ios_new_rounded,
             color: isDark ? Colors.white : Colors.black87,
@@ -196,7 +271,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Step ${_currentStep + 1} of 4',
+                'Step ${currentStep + 1} of 4',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -212,16 +287,15 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   backgroundColor: isDark
                       ? Colors.white10
                       : Colors.black.withValues(alpha: 0.06),
-                  valueColor:
-                      const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
                 ),
               ),
               const SizedBox(height: 20),
-              _buildStepHeader(isDark),
+              _buildStepHeader(currentStep, isDark),
               const SizedBox(height: 20),
               _buildStepBody(profile, isDark),
               const SizedBox(height: 24),
-              _currentStep == 0
+              currentStep == 0
                   ? SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -244,10 +318,9 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _goBack,
+                            onPressed: () => _goBack(currentStep),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor:
-                                  isDark ? Colors.white : Colors.black87,
+                              foregroundColor: isDark ? Colors.white : Colors.black87,
                               side: BorderSide(
                                 color: isDark ? Colors.white24 : Colors.black12,
                               ),
@@ -258,15 +331,14 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                             ),
                             child: Text(
                               'Back',
-                              style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w700),
+                              style: GoogleFonts.inter(fontWeight: FontWeight.w700),
                             ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton(
-                            onPressed: () => _goNext(profile),
+                            onPressed: profile.isLoading ? null : () => _goNext(profile),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
@@ -275,15 +347,21 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                                 borderRadius: BorderRadius.circular(18),
                               ),
                             ),
-                            child: Text(
-                              _currentStep == 3
-                                  ? (widget.returnToProfile
-                                      ? 'Save Profile'
-                                      : 'Finish Setup')
-                                  : 'Continue',
-                              style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w700),
-                            ),
+                            child: profile.isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : Text(
+                                    currentStep == 3
+                                        ? (widget.returnToProfile ? 'Save Profile' : 'Finish Setup')
+                                        : 'Continue',
+                                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                                  ),
                           ),
                         ),
                       ],
@@ -295,21 +373,19 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     );
   }
 
-  Widget _buildStepHeader(bool isDark) {
-    final title = switch (_currentStep) {
+  Widget _buildStepHeader(int currentStep, bool isDark) {
+    final title = switch (currentStep) {
       0 => 'Tell us about yourself',
       1 => 'Choose your verification path',
       2 => 'Add your verification details',
       _ => 'Review before you continue',
     };
-
-    final subtitle = switch (_currentStep) {
+    final subtitle = switch (currentStep) {
       0 => 'We use these details to build trust between riders and drivers.',
       1 => 'Pick the method that best matches how you use BikePool.',
       2 => 'These details stay attached to your account and trust profile.',
       _ => 'You can edit these later from the Profile section as well.',
     };
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -335,7 +411,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   }
 
   Widget _buildStepBody(ProfileSetupState profile, bool isDark) {
-    switch (_currentStep) {
+    switch (profile.currentStep) {
       case 0:
         return _buildPersonalDetailsStep(isDark);
       case 1:
@@ -346,6 +422,10 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         return _buildReviewStep(profile, isDark);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Step 0 – Personal details
+  // ---------------------------------------------------------------------------
 
   Widget _buildPersonalDetailsStep(bool isDark) {
     return Form(
@@ -358,12 +438,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
               controller: _fullNameController,
               label: 'Full name',
               hint: 'Enter your full name',
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Full name is required';
-                }
-                return null;
-              },
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Full name is required' : null,
             ),
             const SizedBox(height: 16),
             _buildTextField(
@@ -378,24 +454,16 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
               label: 'Emergency contact',
               hint: '10-digit emergency contact number',
               keyboardType: TextInputType.phone,
-              validator: (value) {
-                if (value == null || value.trim().length != 10) {
-                  return 'Enter a valid 10-digit number';
-                }
-                return null;
-              },
+              validator: (v) =>
+                  (v == null || v.trim().length != 10) ? 'Enter a valid 10-digit number' : null,
             ),
             const SizedBox(height: 16),
             _buildTextField(
               controller: _homeHubController,
               label: 'Home or frequent pickup area',
               hint: 'Example: Hitech City, Hyderabad',
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'This helps us personalize rides';
-                }
-                return null;
-              },
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'This helps us personalize rides' : null,
             ),
           ],
         ),
@@ -403,10 +471,11 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     );
   }
 
-  Widget _buildVerificationChoiceStep(
-    ProfileSetupState profile,
-    bool isDark,
-  ) {
+  // ---------------------------------------------------------------------------
+  // Step 1 – Verification choice
+  // ---------------------------------------------------------------------------
+
+  Widget _buildVerificationChoiceStep(ProfileSetupState profile, bool isDark) {
     return Column(
       children: [
         _buildChoiceCard(
@@ -415,8 +484,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
           subtitle:
               'Best for general riders and drivers using Aadhaar, licence, or passport.',
           icon: Icons.badge_rounded,
-          selected:
-              profile.verificationMethod == VerificationMethod.governmentId,
+          selected: profile.verificationMethod == VerificationMethod.governmentId,
           onTap: () => ref
               .read(profileSetupProvider.notifier)
               .selectVerificationMethod(VerificationMethod.governmentId),
@@ -437,10 +505,11 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     );
   }
 
-  Widget _buildVerificationDetailsStep(
-    ProfileSetupState profile,
-    bool isDark,
-  ) {
+  // ---------------------------------------------------------------------------
+  // Step 2 – Verification details
+  // ---------------------------------------------------------------------------
+
+  Widget _buildVerificationDetailsStep(ProfileSetupState profile, bool isDark) {
     if (profile.verificationMethod == null) {
       return _buildCardShell(
         isDark: isDark,
@@ -456,197 +525,439 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
 
     return Form(
       key: _verificationFormKey,
-      child: _buildCardShell(
-        isDark: isDark,
-        child: profile.verificationMethod == VerificationMethod.governmentId
-            ? Column(
-                children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedGovernmentIdType,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedGovernmentIdType = value);
-                      }
-                    },
-                    decoration: _inputDecoration(
-                      label: 'Government ID type',
-                      hint: 'Choose your document type',
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Aadhaar',
-                        child: Text('Aadhaar'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Driving Licence',
-                        child: Text('Driving Licence'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Passport',
-                        child: Text('Passport'),
+      child: profile.verificationMethod == VerificationMethod.governmentId
+          ? _buildGovernmentIdSection(profile, isDark)
+          : _buildCardShell(isDark: isDark, child: _buildCompanyIdForm(profile, isDark)),
+    );
+  }
+
+  // --- Government ID ---
+
+  Widget _buildGovernmentIdSection(ProfileSetupState profile, bool isDark) {
+    return Column(
+      children: [
+        _buildCardShell(
+          isDark: isDark,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: _selectedGovernmentIdType,
+                onChanged: profile.isDocumentUploaded
+                    ? null
+                    : (value) {
+                        if (value != null) setState(() => _selectedGovernmentIdType = value);
+                      },
+                decoration: _inputDecoration(
+                  label: 'Government ID type',
+                  hint: 'Choose your document type',
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'Aadhaar', child: Text('Aadhaar')),
+                  DropdownMenuItem(value: 'Driving Licence', child: Text('Driving Licence')),
+                  DropdownMenuItem(value: 'Passport', child: Text('Passport')),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _buildTextField(
+                controller: _governmentIdController,
+                label: 'Document number',
+                hint: 'Enter your document number',
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Document number is required' : null,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // --- Upload section ---
+        _buildCardShell(
+          isDark: isDark,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Upload Document Photos',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Tap each slot to choose a clear photo from your gallery. Both sides are required.',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  height: 1.5,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Front
+              _buildImagePickerTile(
+                isDark: isDark,
+                label: 'Front side',
+                sublabel: 'The side with your name & photo',
+                imageBytes: profile.frontImageBytes,
+                isPicking: _isPickingFront,
+                onTap: _isPickingFront ? null : _pickFrontImage,
+                onRemove: profile.isFrontUploaded
+                    ? () => ref.read(profileSetupProvider.notifier).removeFrontImage()
+                    : null,
+              ),
+              const SizedBox(height: 12),
+
+              // Back
+              _buildImagePickerTile(
+                isDark: isDark,
+                label: 'Back side',
+                sublabel: 'The reverse side of the document',
+                imageBytes: profile.backImageBytes,
+                isPicking: _isPickingBack,
+                onTap: _isPickingBack ? null : _pickBackImage,
+                onRemove: profile.isBackUploaded
+                    ? () => ref.read(profileSetupProvider.notifier).removeBackImage()
+                    : null,
+              ),
+
+              // Both done banner
+              if (profile.isDocumentUploaded) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.verified_rounded, color: Colors.green, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Both sides added — you\'re good to continue!',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green.shade700,
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _governmentIdController,
-                    readOnly: profile.isDocumentUploaded,
-                    label: 'Document number',
-                    hint: 'Enter your document number',
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Document number is required';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  if (profile.isDocumentUploaded)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text('Document uploaded successfully!'),
-                        ],
-                      ),
-                    )
-                  else
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
-                        onPressed: profile.isLoading
-                            ? null
-                            : () {
-                                if (_verificationFormKey.currentState!
-                                    .validate()) {
-                                  ref
-                                      .read(profileSetupProvider.notifier)
-                                      .simulateDocumentUpload();
-                                }
-                              },
-                        icon: profile.isLoading
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.upload_file),
-                        label: const Text('Upload Document Front & Back'),
-                      ),
-                    ),
-                ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// A tappable image slot that shows a preview when an image is selected.
+  Widget _buildImagePickerTile({
+    required bool isDark,
+    required String label,
+    required String sublabel,
+    required Uint8List? imageBytes,
+    required bool isPicking,
+    required VoidCallback? onTap,
+    VoidCallback? onRemove,
+  }) {
+    final hasImage = imageBytes != null;
+
+    return GestureDetector(
+      onTap: hasImage ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: hasImage
+              ? Colors.transparent
+              : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: hasImage
+                ? Colors.green.withValues(alpha: 0.45)
+                : isPicking
+                    ? AppColors.primary.withValues(alpha: 0.5)
+                    : (isDark ? Colors.white12 : Colors.black12),
+            width: hasImage ? 1.5 : 1.2,
+          ),
+        ),
+        child: hasImage
+            ? _buildImagePreview(
+                isDark: isDark,
+                label: label,
+                imageBytes: imageBytes,
+                onRemove: onRemove,
+                onReplace: onTap,
               )
-            : Column(
-                children: [
-                  _buildTextField(
-                    controller: _companyNameController,
-                    label: 'Company name',
-                    hint: 'Enter your company name',
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Company name is required';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _companyEmailController,
-                    label: 'Work email',
-                    hint: 'name@company.com',
-                    keyboardType: TextInputType.emailAddress,
-                    validator: (value) {
-                      final text = value?.trim() ?? '';
-                      if (text.isEmpty || !text.contains('@')) {
-                        return 'Enter a valid work email';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _employeeIdController,
-                    label: 'Employee ID',
-                    hint: 'Enter your employee ID',
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Employee ID is required';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  if (profile.isEmailVerificationSent)
+            : Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      width: 48,
+                      height: 48,
                       decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
+                        color: isPicking
+                            ? AppColors.primary.withValues(alpha: 0.1)
+                            : (isDark ? Colors.white10 : Colors.grey.shade100),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Row(
+                      child: isPicking
+                          ? const Padding(
+                              padding: EdgeInsets.all(12),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: AppColors.primary,
+                              ),
+                            )
+                          : Icon(
+                              Icons.add_photo_alternate_rounded,
+                              color: isDark ? Colors.white38 : Colors.black38,
+                            ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.check_circle, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text('Verification sent! Check your inbox.'),
+                          Text(
+                            label,
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isPicking ? 'Opening gallery…' : sublabel,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: isPicking
+                                  ? AppColors.primary
+                                  : (isDark ? Colors.white38 : Colors.black38),
+                            ),
+                          ),
                         ],
                       ),
-                    )
-                  else
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
-                          ),
-                        ),
-                        onPressed: profile.isLoading
-                            ? null
-                            : () {
-                                if (_verificationFormKey.currentState!
-                                    .validate()) {
-                                  ref
-                                      .read(profileSetupProvider.notifier)
-                                      .simulateSendVerificationEmail();
-                                }
-                              },
-                        child: profile.isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Send Verification Link'),
-                      ),
                     ),
-                ],
+                    if (!isPicking)
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: isDark ? Colors.white24 : Colors.black26,
+                      ),
+                  ],
+                ),
               ),
       ),
     );
   }
+
+  Widget _buildImagePreview({
+    required bool isDark,
+    required String label,
+    required Uint8List imageBytes,
+    VoidCallback? onRemove,
+    VoidCallback? onReplace,
+  }) {
+    return Column(
+      children: [
+        Stack(
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+              child: Image.memory(
+                imageBytes,
+                width: double.infinity,
+                height: 160,
+                fit: BoxFit.cover,
+              ),
+            ),
+            // Label badge
+            Positioned(
+              top: 10,
+              left: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  label,
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            // Remove button
+            if (onRemove != null)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: onRemove,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.close, color: Colors.white, size: 17),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        // Replace / confirmed row
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.green.withValues(alpha: 0.08),
+            borderRadius: const BorderRadius.vertical(bottom: Radius.circular(15)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.green, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Image selected',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.green.shade700,
+                  ),
+                ),
+              ),
+              if (onReplace != null)
+                GestureDetector(
+                  onTap: onReplace,
+                  child: Text(
+                    'Replace',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Company ID ---
+
+  Widget _buildCompanyIdForm(ProfileSetupState profile, bool isDark) {
+    return Column(
+      children: [
+        _buildTextField(
+          controller: _companyNameController,
+          label: 'Company name',
+          hint: 'Enter your company name',
+          validator: (v) =>
+              (v == null || v.trim().isEmpty) ? 'Company name is required' : null,
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          controller: _companyEmailController,
+          label: 'Work email',
+          hint: 'name@company.com',
+          keyboardType: TextInputType.emailAddress,
+          validator: (v) {
+            final t = v?.trim() ?? '';
+            return (t.isEmpty || !t.contains('@')) ? 'Enter a valid work email' : null;
+          },
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          controller: _employeeIdController,
+          label: 'Employee ID',
+          hint: 'Enter your employee ID',
+          validator: (v) =>
+              (v == null || v.trim().isEmpty) ? 'Employee ID is required' : null,
+        ),
+        const SizedBox(height: 16),
+        if (profile.isEmailVerificationSent)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.green.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.green),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Verification sent! Check your inbox.',
+                    style: GoogleFonts.inter(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: profile.isLoading
+                  ? null
+                  : () {
+                      if (_verificationFormKey.currentState!.validate()) {
+                        ref
+                            .read(profileSetupProvider.notifier)
+                            .saveCompanyVerification(
+                              companyName: _companyNameController.text,
+                              companyEmail: _companyEmailController.text,
+                              employeeId: _employeeIdController.text,
+                            );
+                        ref
+                            .read(profileSetupProvider.notifier)
+                            .simulateSendVerificationEmail();
+                      }
+                    },
+              child: profile.isLoading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text(
+                      'Send Verification Link',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                    ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Step 3 – Review
+  // ---------------------------------------------------------------------------
 
   Widget _buildReviewStep(ProfileSetupState profile, bool isDark) {
     return Column(
@@ -659,10 +970,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
               _buildSummaryRow('Full name', profile.fullName, isDark),
               _buildSummaryRow('Mobile', '+91 ${profile.phoneNumber}', isDark),
               _buildSummaryRow(
-                'Emergency contact',
-                '+91 ${profile.emergencyContact}',
-                isDark,
-              ),
+                'Emergency contact', '+91 ${profile.emergencyContact}', isDark),
               _buildSummaryRow('Frequent pickup', profile.homeHub, isDark),
             ],
           ),
@@ -673,32 +981,76 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _buildSummaryRow('Verification type', profile.verificationLabel, isDark),
               _buildSummaryRow(
-                'Verification type',
-                profile.verificationLabel,
-                isDark,
-              ),
+                  'Verification details', profile.verificationSummary, isDark),
               _buildSummaryRow(
-                'Verification details',
-                profile.verificationSummary,
-                isDark,
-              ),
-              _buildSummaryRow(
-                'Trust status',
-                profile.verificationStatusLabel,
-                isDark,
-              ),
+                  'Trust status', profile.verificationStatusLabel, isDark),
             ],
           ),
+        ),
+        // Document thumbnails in review
+        if (profile.verificationMethod == VerificationMethod.governmentId &&
+            profile.isDocumentUploaded) ...[
+          const SizedBox(height: 14),
+          _buildCardShell(
+            isDark: isDark,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Document Photos',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildMiniThumb(
+                          label: 'Front', bytes: profile.frontImageBytes),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _buildMiniThumb(
+                          label: 'Back', bytes: profile.backImageBytes),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildMiniThumb({required String label, required Uint8List? bytes}) {
+    if (bytes == null) return const SizedBox.shrink();
+    return Column(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.memory(bytes, height: 80, width: double.infinity, fit: BoxFit.cover),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: GoogleFonts.inter(fontSize: 11, color: Colors.green.shade600,
+              fontWeight: FontWeight.w600),
         ),
       ],
     );
   }
 
-  Widget _buildCardShell({
-    required bool isDark,
-    required Widget child,
-  }) {
+  // ---------------------------------------------------------------------------
+  // Shared widgets
+  // ---------------------------------------------------------------------------
+
+  Widget _buildCardShell({required bool isDark, required Widget child}) {
     final highContrast = MediaQuery.of(context).highContrast;
     return Container(
       width: double.infinity,
@@ -712,10 +1064,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
           strength: 0.95,
         ),
         border: Border.all(
-          color: AppColors.softStroke(
-            isDark: isDark,
-            highContrast: highContrast,
-          ),
+          color: AppColors.softStroke(isDark: isDark, highContrast: highContrast),
         ),
       ),
       child: child,
@@ -756,10 +1105,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                     tint: AppColors.primary,
                     strength: 1.2,
                   )
-                : AppColors.softStroke(
-                    isDark: isDark,
-                    highContrast: highContrast,
-                  ),
+                : AppColors.softStroke(isDark: isDark, highContrast: highContrast),
             width: selected ? 1.4 : 1,
           ),
         ),
@@ -831,21 +1177,14 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     );
   }
 
-  InputDecoration _inputDecoration({
-    required String label,
-    required String hint,
-  }) {
+  InputDecoration _inputDecoration({required String label, required String hint}) {
     return InputDecoration(
       labelText: label,
       hintText: hint,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-      ),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(18)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide(
-          color: Colors.black.withValues(alpha: 0.08),
-        ),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       filled: true,

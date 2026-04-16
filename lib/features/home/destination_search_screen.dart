@@ -12,6 +12,7 @@ import '../../core/services/google_maps_service.dart';
 import '../../core/providers/maps_providers.dart';
 import '../../core/theme/app_colors.dart';
 import 'search_history_provider.dart';
+import '../../core/services/search_history_service.dart';
 
 class DestinationSearchScreen extends ConsumerStatefulWidget {
   final String currentLocationLabel;
@@ -129,8 +130,8 @@ class _DestinationSearchScreenState
       _sessionToken = const Uuid().v4();
 
       if (details != null && mounted) {
-        // Save to search history
-        ref.read(searchHistoryProvider.notifier).addSearch(
+        // Save to search history (async, but don't block navigation)
+        ref.read(currentUserSearchHistoryNotifierProvider.notifier).addSearch(
               SearchHistoryItem(
                 title: prediction.mainText,
                 subtitle: prediction.secondaryText,
@@ -186,8 +187,9 @@ class _DestinationSearchScreenState
 
   @override
   Widget build(BuildContext context) {
-    final searchHistory = ref.watch(searchHistoryProvider);
+    final searchHistoryAsync = ref.watch(searchHistoryProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     final showHistory = _searchController.text.isEmpty && _predictions.isEmpty;
 
     return Scaffold(
@@ -272,7 +274,19 @@ class _DestinationSearchScreenState
           // ─── Results / History ─────────────────────────────────────
           Expanded(
             child: showHistory
-                ? _buildHistoryAndQuickActions(searchHistory)
+                ? searchHistoryAsync.when(
+                    data: (history) =>
+                        _buildHistoryAndQuickActions(history),
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    error: (error, stack) => Center(
+                      child: Text('Error loading history: $error'),
+                    ),
+                  )
                 : _buildPredictionsList(),
           ),
 
@@ -545,7 +559,8 @@ class _DestinationSearchScreenState
               const Spacer(),
               GestureDetector(
                 onTap: () =>
-                    ref.read(searchHistoryProvider.notifier).clearHistory(),
+                    ref.read(currentUserSearchHistoryNotifierProvider.notifier)
+                        .clearHistory(),
                 child: Padding(
                   padding: const EdgeInsets.all(8.0),
                   child: Text(

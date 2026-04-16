@@ -7,12 +7,18 @@ class PlanRideSheet extends StatelessWidget {
   final String vehicleTitle;
   final IconData vehicleIcon;
   final Color vehicleColor;
+  /// Real GPS origin — passed down from HomeScreen.
+  /// Falls back to Hyderabad centre only when permissions are denied.
+  final double? originLat;
+  final double? originLng;
 
   const PlanRideSheet({
     super.key,
     required this.vehicleTitle,
     required this.vehicleIcon,
     required this.vehicleColor,
+    this.originLat,
+    this.originLng,
   });
 
   @override
@@ -165,8 +171,10 @@ class PlanRideSheet extends StatelessWidget {
                                         context
                                             .goNamed('available-rides', extra: {
                                           'destination': value,
-                                          'lat': 17.4500,
-                                          'lng': 78.3800,
+                                          'lat': 17.3850,
+                                          'lng': 78.4867,
+                                          'originLat': originLat,
+                                          'originLng': originLng,
                                           'initialVehicleType': vehicleTitle,
                                         });
                                       }
@@ -301,8 +309,10 @@ class PlanRideSheet extends StatelessWidget {
         Navigator.pop(context);
         context.goNamed('available-rides', extra: {
           'destination': '$title, $subtitle',
-          'lat': 17.4500,
-          'lng': 78.3800,
+          'lat': 17.3850,
+          'lng': 78.4867,
+          'originLat': originLat,
+          'originLng': originLng,
           'initialVehicleType': vehicleTitle,
         });
       },

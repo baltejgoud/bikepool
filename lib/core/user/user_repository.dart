@@ -8,6 +8,14 @@ class UserRepository {
     await _firestore.collection('users').doc(user.uid).set(user.toFirestore());
   }
 
+  Future<void> updateUserProfileFields(
+      String uid, Map<String, dynamic> fields) async {
+    await _firestore
+        .collection('users')
+        .doc(uid)
+        .set(fields, SetOptions(merge: true));
+  }
+
   Future<UserModel?> getUserProfile(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
     if (!doc.exists) return null;

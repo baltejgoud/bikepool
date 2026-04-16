@@ -21,6 +21,8 @@ class AvailableRidesScreen extends ConsumerStatefulWidget {
   final String destination;
   final double destinationLat;
   final double destinationLng;
+  final double? originLat;
+  final double? originLng;
   final String? initialVehicleType;
 
   const AvailableRidesScreen({
@@ -28,6 +30,8 @@ class AvailableRidesScreen extends ConsumerStatefulWidget {
     required this.destination,
     required this.destinationLat,
     required this.destinationLng,
+    this.originLat,
+    this.originLng,
     this.initialVehicleType,
   });
 
@@ -39,6 +43,11 @@ class AvailableRidesScreen extends ConsumerStatefulWidget {
 class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
   String? _selectedFilter;
   RideSortOption _selectedSort = RideSortOption.bestMatch;
+
+  /// Stable key for [matchedRidesProvider]. Must be created once and reused
+  /// because Dart Maps use identity equality — a fresh literal on every
+  /// build() would make Riverpod restart the provider in an infinite loop.
+  late final Map<String, double> _rideParams;
 
   final List<String> _filters = [
     'All',
@@ -52,10 +61,17 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
   void initState() {
     super.initState();
     _selectedFilter = widget.initialVehicleType ?? 'All';
+    _rideParams = {
+      'originLat': widget.originLat ?? 17.3850,
+      'originLng': widget.originLng ?? 78.4867,
+      'destinationLat': widget.destinationLat,
+      'destinationLng': widget.destinationLng,
+    };
   }
 
   RideOption _mapRideToOption(RideModel ride) {
     return RideOption(
+      rideId: ride.id,
       type: ride.vehicleType,
       name: ride.vehicleType == VehicleType.bike ? 'Bike' : 'Car',
       seats: ride.availableSeats,
@@ -191,12 +207,9 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final highContrast = MediaQuery.of(context).highContrast;
 
-    final ridesAsync = ref.watch(matchedRidesProvider({
-      'originLat': 17.3850,
-      'originLng': 78.4867,
-      'destinationLat': widget.destinationLat,
-      'destinationLng': widget.destinationLng,
-    }));
+    // Use the stable _rideParams map (created once in initState) to
+    // avoid Riverpod re-creating the family provider on every rebuild.
+    final ridesAsync = ref.watch(matchedRidesProvider(_rideParams));
 
     return ridesAsync.when(
       data: (allRides) {
@@ -312,8 +325,60 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
         ),
       ),
       error: (e, s) => Scaffold(
-        appBar: AppBar(leading: const AppBackButton()),
-        body: const Center(child: Text('Error searching rides')),
+        appBar: AppBar(
+          leading: const AppBackButton(),
+          title: Text(
+            'Choose your ride',
+            style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.wifi_off_rounded,
+                  size: 64,
+                  color: isDark ? Colors.white24 : Colors.grey[400],
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Could not load rides',
+                  style: GoogleFonts.outfit(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Check your connection and try again.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: isDark ? Colors.white54 : Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                ElevatedButton.icon(
+                  onPressed: () => context.pop(),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label: const Text('Go Back'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 28, vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

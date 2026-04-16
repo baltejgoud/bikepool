@@ -12,6 +12,8 @@ import '../../features/driver/request_management_screen.dart';
 import '../../features/driver/driver_dashboard_screen.dart';
 import '../../features/profile/profile_screen.dart';
 import '../../features/profile/profile_setup_screen.dart';
+import '../../features/profile/personal_details_screen.dart';
+import '../../features/profile/verification_trust_screen.dart';
 import '../../features/profile/notification_settings_screen.dart';
 import '../../features/profile/ride_preferences_screen.dart';
 import '../../features/profile/help_safety_screen.dart';
@@ -78,10 +80,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: 'destination-search',
             name: 'destination-search',
-            builder: (context, state) => const DestinationSearchScreen(
-              currentLocationLabel: 'Your location',
-              currentAddress: 'Kukatpally, Hyderabad',
-            ),
+            builder: (context, state) {
+              final extra = state.extra as Map<String, dynamic>?;
+              return DestinationSearchScreen(
+                currentLocationLabel: 'Your location',
+                // Use address passed from HomeScreen (reverse-geocoded);
+                // fall back to a generic label instead of a hardcoded area.
+                currentAddress: extra?['currentAddress'] as String? ?? 'Fetching your location…',
+              );
+            },
           ),
           GoRoute(
             path: 'available-rides',
@@ -90,8 +97,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               final extra = state.extra as Map<String, dynamic>?;
               return AvailableRidesScreen(
                 destination: extra?['destination'] ?? '',
-                destinationLat: extra?['lat'] ?? 17.3850,
-                destinationLng: extra?['lng'] ?? 78.4867,
+                destinationLat: (extra?['lat'] as num?)?.toDouble() ?? 17.3850,
+                destinationLng: (extra?['lng'] as num?)?.toDouble() ?? 78.4867,
+                originLat: (extra?['originLat'] as num?)?.toDouble(),
+                originLng: (extra?['originLng'] as num?)?.toDouble(),
                 initialVehicleType: extra?['initialVehicleType'],
               );
             },
@@ -122,6 +131,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             name: 'profile',
             builder: (context, state) => const ProfileScreen(),
             routes: [
+              GoRoute(
+                path: 'personal-details',
+                name: 'personal-details',
+                builder: (context, state) => const PersonalDetailsScreen(),
+              ),
+              GoRoute(
+                path: 'verification-trust',
+                name: 'verification-trust',
+                builder: (context, state) => const VerificationTrustScreen(),
+              ),
               GoRoute(
                 path: 'carbon-dashboard',
                 name: 'carbon-dashboard',

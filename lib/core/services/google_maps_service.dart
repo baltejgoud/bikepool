@@ -200,6 +200,35 @@ class GoogleMapsService {
     }
   }
 
+  // ─── Geocoding API ────────────────────────────────────────────
+
+  /// Reverse-geocode [lat]/[lng] to a short human-readable address.
+  /// Returns the first non-null formatted address, or null on failure.
+  Future<String?> reverseGeocode(double lat, double lng) async {
+    try {
+      final response = await _dio.get(
+        'https://maps.googleapis.com/maps/api/geocode/json',
+        queryParameters: {
+          'latlng': '$lat,$lng',
+          'key': _apiKey,
+          'result_type': 'sublocality|locality',
+          'language': 'en',
+        },
+      );
+
+      final data = response.data as Map<String, dynamic>;
+      if (data['status'] != 'OK') return null;
+
+      final results = data['results'] as List<dynamic>;
+      if (results.isEmpty) return null;
+
+      return (results.first as Map<String, dynamic>)['formatted_address']
+          as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── Distance Matrix API ──────────────────────────────────────────
 
   /// Get driving distance and duration between origin and destination.

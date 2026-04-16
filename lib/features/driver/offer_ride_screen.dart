@@ -139,7 +139,6 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
     _destLat = details.lat;
     _destLng = details.lng;
 
-
     // Get real route + distance using Directions API
     if (_originLat != null && _originLng != null) {
       final route = await mapsService.getDirections(
@@ -185,7 +184,10 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
 
   /// Recalculate fare when vehicle type or seats change after destination already selected
   Future<void> _recalculateFare() async {
-    if (_destLat == null || _destLng == null || _originLat == null || _originLng == null) return;
+    if (_destLat == null ||
+        _destLng == null ||
+        _originLat == null ||
+        _originLng == null) return;
     setState(() => _isLoadingPrice = true);
     try {
       final serverFare = await ref.read(rideRepositoryProvider).getServerFare(
@@ -196,7 +198,8 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
           );
       if (mounted) {
         setState(() {
-          _earningsRange = '₹${(serverFare * 0.8).round()}–₹${(serverFare * 1.2).round()}';
+          _earningsRange =
+              '₹${(serverFare * 0.8).round()}–₹${(serverFare * 1.2).round()}';
           _price = serverFare;
           _isLoadingPrice = false;
         });
@@ -372,7 +375,9 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                   itemCount: _predictions.length,
                   separatorBuilder: (_, __) => Divider(
                     height: 1,
-                    color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.06),
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.06),
                   ),
                   itemBuilder: (context, index) {
                     final prediction = _predictions[index];
@@ -388,7 +393,9 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                         style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? AppColors.textPrimaryDark : AppColors.textPrimaryLight,
+                          color: isDark
+                              ? AppColors.textPrimaryDark
+                              : AppColors.textPrimaryLight,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -397,7 +404,9 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                         prediction.secondaryText,
                         style: GoogleFonts.inter(
                           fontSize: 12,
-                          color: isDark ? AppColors.textSecondaryDark : AppColors.textSecondaryLight,
+                          color: isDark
+                              ? AppColors.textSecondaryDark
+                              : AppColors.textSecondaryLight,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -769,7 +778,9 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                       color: isDark ? Colors.black26 : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                          color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
+                          color: isDark
+                              ? Colors.white10
+                              : Colors.black.withValues(alpha: 0.05)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -882,32 +893,219 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                                 originLng: _originLng ?? 0.0,
                                 destinationLat: _destLat ?? 0.0,
                                 destinationLng: _destLng ?? 0.0,
-                                routePolyline: _routePolyline.isNotEmpty ? _routePolyline : null,
+                                routePolyline: _routePolyline.isNotEmpty
+                                    ? _routePolyline
+                                    : null,
                                 distanceMeters: _distanceMeters,
                                 durationSeconds: _durationSeconds,
-                                distanceText: _distance != '-' ? _distance : null,
-                                durationText: _duration != '-' ? _duration : null,
+                                distanceText:
+                                    _distance != '-' ? _distance : null,
+                                durationText:
+                                    _duration != '-' ? _duration : null,
                               );
 
                           if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '✅ Ride posted successfully!',
-                                style: GoogleFonts.inter(
-                                    fontWeight: FontWeight.w600),
-                              ),
-                              backgroundColor: AppColors.accent,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
-                            ),
+
+                          // Show success dialog with ride details
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (BuildContext dialogContext) {
+                              final isDarkDialog =
+                                  Theme.of(dialogContext).brightness ==
+                                      Brightness.dark;
+                              return AlertDialog(
+                                title: Row(
+                                  children: [
+                                    const Icon(Icons.check_circle,
+                                        color: AppColors.accent, size: 28),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      'Ride Posted!',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 18,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                content: SingleChildScrollView(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Your ride is now live and visible to riders!',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 14,
+                                          color: isDarkDialog
+                                              ? Colors.white70
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      _buildDialogDetailRow(
+                                        'From',
+                                        'Current Location',
+                                        isDarkDialog,
+                                      ),
+                                      _buildDialogDetailRow(
+                                        'To',
+                                        _destinationController.text.isEmpty
+                                            ? 'Selected Destination'
+                                            : _destinationController.text,
+                                        isDarkDialog,
+                                      ),
+                                      _buildDialogDetailRow(
+                                        'Price',
+                                        '₹${_price.toStringAsFixed(0)}',
+                                        isDarkDialog,
+                                      ),
+                                      _buildDialogDetailRow(
+                                        'Seats',
+                                        '$_availableSeats available',
+                                        isDarkDialog,
+                                      ),
+                                      if (_distance != '-')
+                                        _buildDialogDetailRow(
+                                          'Distance',
+                                          _distance,
+                                          isDarkDialog,
+                                        ),
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: isDarkDialog
+                                              ? Colors.blue.withOpacity(0.2)
+                                              : Colors.blue.withOpacity(0.1),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.info_outline,
+                                                size: 18,
+                                                color: AppColors.primary),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                'You\'ll receive notifications when riders request to join.',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13,
+                                                  color: isDarkDialog
+                                                      ? Colors.white70
+                                                      : Colors.black87,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                actionsAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.of(dialogContext).pop();
+                                      if (context.mounted) {
+                                        context.goNamed('home');
+                                      }
+                                    },
+                                    child: Text(
+                                      'Back to Home',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      Navigator.of(dialogContext).pop();
+                                      if (context.mounted) {
+                                        context.pushReplacementNamed(
+                                          'driver-dashboard',
+                                        );
+                                      }
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'View Dashboard',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           );
-                          if (context.mounted) context.pop(); // Returns to Home screen
                         } catch (e) {
+                          print('❌ ERROR in postRide: $e');
+                          print('Error type: ${e.runtimeType}');
                           if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error posting ride: $e')),
+                            showDialog(
+                              context: context,
+                              builder: (BuildContext dialogContext) {
+                                final isDarkDialog =
+                                    Theme.of(dialogContext).brightness ==
+                                        Brightness.dark;
+                                return AlertDialog(
+                                  title: Row(
+                                    children: [
+                                      const Icon(Icons.error_outline,
+                                          color: Colors.redAccent, size: 28),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        'Failed to Post Ride',
+                                        style: GoogleFonts.inter(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 18,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  content: SingleChildScrollView(
+                                    child: Text(
+                                      e
+                                          .toString()
+                                          .replaceAll('Exception: ', ''),
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: isDarkDialog
+                                            ? Colors.white70
+                                            : Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.of(dialogContext).pop();
+                                      },
+                                      child: Text(
+                                        'Try Again',
+                                        style: GoogleFonts.inter(
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
                             );
                           }
                         } finally {
@@ -934,6 +1132,32 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
             const SizedBox(height: 32),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDialogDetailRow(String label, String value, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: isDark ? Colors.white70 : Colors.black54,
+            ),
+          ),
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+        ],
       ),
     );
   }

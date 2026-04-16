@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../shared/widgets/app_back_button.dart';
 import '../../shared/widgets/app_pill.dart';
 import 'providers/profile_setup_provider.dart';
@@ -51,10 +52,7 @@ class ProfileScreen extends ConsumerWidget {
             trailingLabel: profile.hasPersonalDetails ? 'Complete' : 'Required',
             trailingColor:
                 profile.hasPersonalDetails ? AppColors.primary : Colors.orange,
-            onTap: () => context.pushNamed(
-              'profile-setup',
-              extra: {'step': 0, 'returnToProfile': true},
-            ),
+            onTap: () => context.go('/home/profile/personal-details'),
           ),
           _ProfileActionCard(
             isDark: isDark,
@@ -67,10 +65,7 @@ class ProfileScreen extends ConsumerWidget {
                 profile.verificationStatus == VerificationStatus.submitted
                     ? const Color(0xFF10B981)
                     : Colors.orange,
-            onTap: () => context.pushNamed(
-              'profile-setup',
-              extra: {'step': 1, 'returnToProfile': true},
-            ),
+            onTap: () => context.go('/home/profile/verification-trust'),
           ),
           const SizedBox(height: 28),
           _SectionLabel(title: 'Insights', isDark: isDark),
@@ -128,9 +123,9 @@ class ProfileScreen extends ConsumerWidget {
           const SizedBox(height: 28),
           _SignOutButton(
             isDark: isDark,
-            onTap: () {
+            onTap: () async {
               ref.read(profileSetupProvider.notifier).reset();
-              context.goNamed('onboarding');
+              await ref.read(authRepositoryProvider).signOut();
             },
           ),
         ],

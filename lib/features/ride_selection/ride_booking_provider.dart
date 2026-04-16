@@ -34,6 +34,7 @@ class RideBookingNotifier extends StateNotifier<RideBookingState> {
     state = state.copyWith(
       status: RideBookingStatus.requesting,
       selectedRide: ride,
+      rideId: ride.rideId,
     );
   }
 

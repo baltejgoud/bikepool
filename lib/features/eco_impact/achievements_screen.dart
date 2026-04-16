@@ -1,18 +1,53 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/providers/data_providers.dart';
 import '../../shared/widgets/app_back_button.dart';
 import 'models/milestone.dart';
 
-class AchievementsScreen extends StatelessWidget {
+class AchievementsScreen extends ConsumerWidget {
   const AchievementsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // userMilestonesProvider is now a plain Provider — access its value directly.
+    // The upstream myRidesAsRiderProvider is watched for loading/error states.
+    final ridesAsync = ref.watch(myRidesAsRiderProvider);
+    final milestones = ref.watch(userMilestonesProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final highContrast = MediaQuery.of(context).highContrast;
-    final milestones = Milestone.sampleMilestones;
 
+    return ridesAsync.when(
+      data: (_) =>
+          _buildAchievementsScreen(context, milestones, isDark, highContrast),
+      loading: () => Scaffold(
+        appBar: AppBar(
+          leading: const AppBackButton(),
+          title: Text(
+            'Achievements',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stackTrace) => Scaffold(
+        appBar: AppBar(
+          leading: const AppBackButton(),
+          title: Text(
+            'Achievements',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        body: Center(
+          child: Text('Error loading achievements: $error'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAchievementsScreen(BuildContext context,
+      List<Milestone> milestones, bool isDark, bool highContrast) {
     // Calculate tier based on completed milestones
     final completedCount = milestones.where((m) => m.isCompleted).length;
     final tier = _getTier(completedCount);
@@ -90,7 +125,8 @@ class AchievementsScreen extends StatelessWidget {
                         LinearProgressIndicator(
                           value: completedCount / milestones.length,
                           backgroundColor: Colors.white.withValues(alpha: 0.2),
-                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor:
+                              const AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       ],
                     ),
@@ -220,9 +256,8 @@ class _MilestoneCard extends StatelessWidget {
                         style: GoogleFonts.inter(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: milestone.isCompleted
-                              ? AppColors.primary
-                              : null,
+                          color:
+                              milestone.isCompleted ? AppColors.primary : null,
                         ),
                       ),
                     ),

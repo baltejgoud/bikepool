@@ -1,25 +1,53 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/providers/data_providers.dart';
 import '../../shared/widgets/app_back_button.dart';
 import '../../shared/widgets/count_up_number.dart';
 import 'models/carbon_saved.dart';
 
-class CarbonDashboardScreen extends StatefulWidget {
+class CarbonDashboardScreen extends ConsumerWidget {
   const CarbonDashboardScreen({super.key});
 
   @override
-  State<CarbonDashboardScreen> createState() => _CarbonDashboardScreenState();
-}
-
-class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
-  final CarbonSaved _carbonData = CarbonSaved.sample();
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // carbonSavedProvider is now a plain Provider — access its value directly.
+    // The upstream myRidesAsRiderProvider is watched for loading/error states.
+    final ridesAsync = ref.watch(myRidesAsRiderProvider);
+    final carbonData = ref.watch(carbonSavedProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final highContrast = MediaQuery.of(context).highContrast;
 
+    return ridesAsync.when(
+      data: (_) => _buildDashboard(context, carbonData, isDark, highContrast),
+      loading: () => Scaffold(
+        appBar: AppBar(
+          leading: const AppBackButton(),
+          title: Text(
+            'Carbon Saved',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stackTrace) => Scaffold(
+        appBar: AppBar(
+          leading: const AppBackButton(),
+          title: Text(
+            'Carbon Saved',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        body: Center(
+          child: Text('Error loading carbon data: $error'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDashboard(BuildContext context, CarbonSaved carbonData,
+      bool isDark, bool highContrast) {
     return Scaffold(
       appBar: AppBar(
         leading: const AppBackButton(),
@@ -75,7 +103,7 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
                 ),
                 const SizedBox(height: 8),
                 CountUpNumber(
-                  value: _carbonData.totalKg,
+                  value: carbonData.totalKg,
                   suffix: ' kg',
                   style: GoogleFonts.outfit(
                     fontSize: 36,
@@ -85,7 +113,7 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Equivalent to planting ${_carbonData.totalKg ~/ 20} trees',
+                  'Equivalent to planting ${carbonData.totalKg ~/ 20} trees',
                   style: GoogleFonts.inter(
                     fontSize: 14,
                     color: AppColors.secondaryText(
@@ -105,7 +133,7 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
               Expanded(
                 child: _StatCard(
                   title: 'Total Rides',
-                  value: '${_carbonData.totalRides}',
+                  value: '${carbonData.totalRides}',
                   icon: Icons.directions_bike_rounded,
                   isDark: isDark,
                   highContrast: highContrast,
@@ -115,7 +143,7 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
               Expanded(
                 child: _StatCard(
                   title: 'Avg per Ride',
-                  value: '${_carbonData.averagePerRide.toStringAsFixed(1)} kg',
+                  value: '${carbonData.averagePerRide.toStringAsFixed(1)} kg',
                   icon: Icons.trending_up_rounded,
                   isDark: isDark,
                   highContrast: highContrast,
@@ -152,7 +180,7 @@ class _CarbonDashboardScreenState extends State<CarbonDashboardScreen> {
               ),
             ),
             child: _MonthlyChart(
-              data: _carbonData.monthlyBreakdown,
+              data: carbonData.monthlyBreakdown,
               isDark: isDark,
             ),
           ),
@@ -335,7 +363,7 @@ class _MonthlyChartState extends State<_MonthlyChart>
               final maxValueDouble = maxValue.toDouble();
               final index = months.indexOf(month);
               final stagger = (index / months.length) * 0.5;
-              
+
               return Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -345,10 +373,13 @@ class _MonthlyChartState extends State<_MonthlyChart>
                       AnimatedBuilder(
                         animation: _controller,
                         builder: (context, child) {
-                          final t = (_controller.value - stagger).clamp(0.0, 1.0) / (1.0 - stagger);
+                          final t =
+                              (_controller.value - stagger).clamp(0.0, 1.0) /
+                                  (1.0 - stagger);
                           final easedT = Curves.easeOutBack.transform(t);
-                          final height = (value / maxValueDouble) * 150 * easedT;
-                          
+                          final height =
+                              (value / maxValueDouble) * 150 * easedT;
+
                           return Container(
                             width: double.infinity,
                             height: height.clamp(0.0, double.infinity),
