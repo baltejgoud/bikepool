@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/app_back_button.dart';
 
@@ -15,6 +16,7 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _upiController = TextEditingController();
   String _selectedMethod = 'UPI';
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -154,31 +156,71 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
                   ),
                 ],
               ),
-            const SizedBox(height: 48),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 16, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Terms & Conditions',
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '• Withdrawals are processed securely via Razorpay.\n'
+                    '• Standard processing time is up to 24 hours.\n'
+                    '• Please ensure your UPI ID or Bank Details are correct.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: _handleWithdraw,
+                onPressed: _isLoading ? null : _handleWithdraw,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
                 ),
-                child: Text(
-                  'Withdraw Money',
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                child: _isLoading 
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : Text(
+                        'Withdraw Money',
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
               ),
             ),
             const SizedBox(height: 24),
             Center(
               child: Text(
-                'Available balance: ₹1,240.00',
+                'Available balance: ₹1,240.00', // This should be fetched from user state
                 style: GoogleFonts.inter(
                   color: isDark ? Colors.white60 : Colors.black54,
                   fontSize: 14,
@@ -249,58 +291,95 @@ class _WithdrawalScreenState extends State<WithdrawalScreen> {
     );
   }
 
-  void _handleWithdraw() {
-    if (_amountController.text.isEmpty) {
+  Future<void> _handleWithdraw() async {
+    final amountText = _amountController.text.trim();
+    if (amountText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter an amount')),
       );
       return;
     }
-    
-    // Mock success dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 16),
-            const Icon(Icons.check_circle_outline_rounded, color: Colors.green, size: 80),
-            const SizedBox(height: 24),
-            Text(
-              'Withdrawal Initiated',
-              style: GoogleFonts.inter(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Your request for ₹${_amountController.text} has been successfully submitted. It will reflect in your account within 24 hours.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(color: Colors.black54),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  context.pop(); // Close dialog
-                  context.pop(); // Go back to Wallet
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.black,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+
+    final amount = double.tryParse(amountText);
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid amount')),
+      );
+      return;
+    }
+
+    final accountId = _selectedMethod == 'UPI' ? _upiController.text.trim() : 'dummy_bank_account';
+    if (accountId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please enter your ${_selectedMethod == 'UPI' ? 'UPI ID' : 'account details'}')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final httpsCallable = FirebaseFunctions.instance.httpsCallable('createRazorpayPayout');
+      await httpsCallable.call({
+        'amount': amount,
+        'fundAccountId': accountId,
+        'mode': _selectedMethod,
+      });
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      // Success dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 16),
+              const Icon(Icons.check_circle_outline_rounded, color: Colors.green, size: 80),
+              const SizedBox(height: 24),
+              Text(
+                'Withdrawal Initiated',
+                style: GoogleFonts.inter(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
                 ),
-                child: const Text('Back to Wallet'),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              Text(
+                'Your request for ₹$amountText has been successfully submitted. It will reflect in your account within 24 hours.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.black54),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    context.pop(); // Close dialog
+                    context.pop(); // Go back to Wallet
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: const Text('Back to Wallet'),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to process withdrawal: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 }

@@ -7,7 +7,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/models/lat_lng_point.dart';
+import '../../core/models/ride_request_model.dart';
 import '../../core/providers/maps_providers.dart';
+import '../../core/providers/data_providers.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../shared/widgets/app_back_button.dart';
@@ -463,17 +466,58 @@ class _RideRouteMapScreenState extends ConsumerState<RideRouteMapScreen>
                     ? null
                     : () async {
                         setState(() => _isBooking = true);
-                        ref
-                            .read(rideBookingProvider.notifier)
-                            .startRequesting(widget.ride);
+                        
+                        final authState = ref.read(authStateProvider);
+                        final user = authState.value;
+                        if (user == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please login first')),
+                          );
+                          setState(() => _isBooking = false);
+                          return;
+                        }
 
-                        await Future.delayed(const Duration(seconds: 2));
+                        final rideRepository = ref.read(rideRepositoryProvider);
                         
-                        if (!mounted) return;
-                        
-                        ref.read(rideBookingProvider.notifier).setPending();
-                        if (context.mounted) {
-                          context.pushNamed('booking-status');
+                        try {
+                          // Create actual ride request
+                          final request = RideRequestModel(
+                            rideId: widget.ride.rideId!,
+                            riderUid: user.uid,
+                            driverUid: widget.ride.driverUid!,
+                            riderName: user.displayName ?? 'Rider',
+                            riderRating: 5.0,
+                            pickupLocation: _pickupLoc != null
+                                ? '${_pickupLoc!.latitude.toStringAsFixed(5)}, ${_pickupLoc!.longitude.toStringAsFixed(5)}'
+                                : 'Current location',
+                            pickupDistance: _distanceText,
+                            dropLocation: widget.destination,
+                            dropDistance: _distanceText,
+                            estimatedTime: _durationText,
+                            price: widget.ride.priceValue?.toDouble() ?? 0.0,
+                            timestamp: DateTime.now(),
+                          );
+                          
+                          final requestId = await rideRepository.requestRide(request);
+                          
+                          if (!mounted) return;
+                          
+                          ref
+                              .read(rideBookingProvider.notifier)
+                              .startRequesting(widget.ride, requestId: requestId);
+                          
+                          ref.read(rideBookingProvider.notifier).setPending(requestId: requestId);
+                          
+                          if (context.mounted) {
+                            context.pushNamed('booking-status');
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Failed to request ride: $e')),
+                            );
+                            setState(() => _isBooking = false);
+                          }
                         }
                       },
                 style: ElevatedButton.styleFrom(

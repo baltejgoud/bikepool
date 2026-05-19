@@ -1,3 +1,4 @@
+import 'dart:developer' as dev;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/widgets/vehicle_card.dart';
 import '../../../core/models/ride_model.dart';
@@ -99,21 +100,22 @@ class DriverRideNotifier extends StateNotifier<DriverRideState> {
     int? durationSeconds,
     String? distanceText,
     String? durationText,
+    List<String>? preferences,
   }) async {
     final authState = _ref.read(authStateProvider);
     final userProfile = _ref.read(userProfileProvider).value;
     final user = authState.value;
 
-    print('--- [DriverRideNotifier.postRide] Starting ---');
+    dev.log('Starting ride posting', name: 'DriverRideNotifier.postRide');
     if (user == null) {
-      print('ERROR: User is not authenticated.');
+      dev.log('ERROR: User is not authenticated.', name: 'DriverRideNotifier.postRide');
       throw Exception('User is not authenticated.');
     }
     if (userProfile == null) {
-      print('ERROR: User profile not found.');
+      dev.log('ERROR: User profile not found.', name: 'DriverRideNotifier.postRide');
       throw Exception('User profile not found. Please complete your profile.');
     }
-    print('User UID: ${user.uid}, Profile Name: ${userProfile.fullName}');
+    dev.log('User UID: ${user.uid}, Profile Name: ${userProfile.fullName}', name: 'DriverRideNotifier.postRide');
 
     final originPoint = LatLngPoint(lat: originLat, lng: originLng);
     final destinationPoint =
@@ -140,11 +142,12 @@ class DriverRideNotifier extends StateNotifier<DriverRideState> {
       durationSeconds: durationSeconds,
       distanceText: distanceText,
       durationText: durationText,
+      preferences: preferences ?? [],
     );
 
-    print('Calling RideRepository.createRide()');
+    dev.log('Calling RideRepository.createRide()', name: 'DriverRideNotifier.postRide');
     _currentRideId = await _ref.read(rideRepositoryProvider).createRide(ride);
-    print('--- [DriverRideNotifier.postRide] Ride created successfully with ID: $_currentRideId ---');
+    dev.log('Ride created successfully with ID: $_currentRideId', name: 'DriverRideNotifier.postRide');
 
     state = DriverRideState(
       status: DriverRideStatus.findingRiders,

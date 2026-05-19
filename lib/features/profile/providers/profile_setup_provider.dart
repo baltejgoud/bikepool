@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import '../../../../core/auth/auth_provider.dart';
-import '../../../../core/models/user_model.dart' as model;
-import '../../../../core/providers/data_providers.dart';
+import '../../../core/auth/auth_provider.dart';
+import '../../../core/models/user_model.dart' as model;
+import '../../../core/providers/data_providers.dart';
 
 enum VerificationMethod { governmentId, companyId }
 
@@ -182,6 +182,71 @@ class ProfileSetupNotifier extends StateNotifier<ProfileSetupState> {
     final authUser = _ref.read(authStateProvider).value;
     if (authUser != null && authUser.phoneNumber != null) {
       state = state.copyWith(phoneNumber: authUser.phoneNumber);
+    }
+    // Hydrate the in-memory state from Firestore so the Profile and
+    // Personal Details screens always show the user's saved data on open.
+    _loadFromFirestore();
+  }
+
+  /// Reads the persisted [UserModel] from Firestore and populates the
+  /// in-memory [ProfileSetupState] so screens never show stale blank fields.
+  Future<void> _loadFromFirestore() async {
+    final authUser = _ref.read(authStateProvider).value;
+    if (authUser == null) return;
+
+    try {
+      final userModel = await _ref
+          .read(userRepositoryProvider)
+          .getUserProfile(authUser.uid);
+
+      if (userModel == null || !mounted) return;
+
+      // Map the stored VerificationMethod enum to the local one.
+      VerificationMethod? method;
+      if (userModel.verificationMethod != null) {
+        method = userModel.verificationMethod == model.VerificationMethod.governmentId
+            ? VerificationMethod.governmentId
+            : VerificationMethod.companyId;
+      }
+
+      // Map the stored verificationStatus string back to the enum.
+      VerificationStatus status = VerificationStatus.incomplete;
+      if (userModel.verificationStatus == VerificationStatus.submitted.name) {
+        status = VerificationStatus.submitted;
+      } else if (userModel.verificationStatus == VerificationStatus.verified.name) {
+        status = VerificationStatus.verified;
+      }
+
+      state = state.copyWith(
+        fullName: userModel.fullName.isNotEmpty ? userModel.fullName : null,
+        phoneNumber: userModel.phoneNumber.isNotEmpty
+            ? userModel.phoneNumber
+            : state.phoneNumber,
+        emergencyContact: userModel.emergencyContact,
+        homeHub: userModel.homeHub,
+        verificationMethod: method,
+        // Government ID fields stored in detail1/detail2
+        governmentIdNumber: method == VerificationMethod.governmentId
+            ? (userModel.verificationDetail1 ?? '')
+            : null,
+        governmentIdType: method == VerificationMethod.governmentId
+            ? (userModel.verificationDetail2 ?? '')
+            : null,
+        // Company fields stored in detail1/detail2/detail3
+        companyName: method == VerificationMethod.companyId
+            ? (userModel.verificationDetail1 ?? '')
+            : null,
+        companyEmail: method == VerificationMethod.companyId
+            ? (userModel.verificationDetail2 ?? '')
+            : null,
+        employeeId: method == VerificationMethod.companyId
+            ? (userModel.verificationDetail3 ?? '')
+            : null,
+        isEmailVerificationSent: userModel.isEmailVerificationSent,
+        verificationStatus: status,
+      );
+    } catch (_) {
+      // Non-fatal: the UI simply shows empty fields if loading fails.
     }
   }
 

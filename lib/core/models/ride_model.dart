@@ -33,6 +33,7 @@ class RideModel {
   final double? currentDriverLat;
   final double? currentDriverLng;
   final DateTime? lastLocationUpdate;
+  final List<String> preferences;
 
   RideModel({
     this.id,
@@ -61,6 +62,7 @@ class RideModel {
     this.currentDriverLat,
     this.currentDriverLng,
     this.lastLocationUpdate,
+    this.preferences = const [],
   })  : originGeohash =
             originGeohash ?? GeohashService.encode(originLat, originLng),
         destinationGeohash = destinationGeohash ??
@@ -116,6 +118,7 @@ class RideModel {
       lastLocationUpdate: data['lastLocationUpdate'] != null
           ? (data['lastLocationUpdate'] as Timestamp).toDate()
           : null,
+      preferences: List<String>.from(data['preferences'] ?? []),
     );
   }
 
@@ -147,6 +150,7 @@ class RideModel {
       if (currentDriverLng != null) 'currentDriverLng': currentDriverLng,
       if (lastLocationUpdate != null)
         'lastLocationUpdate': Timestamp.fromDate(lastLocationUpdate!),
+      'preferences': preferences,
     };
   }
 }

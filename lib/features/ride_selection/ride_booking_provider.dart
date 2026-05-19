@@ -7,22 +7,26 @@ class RideBookingState {
   final RideBookingStatus status;
   final RideOption? selectedRide;
   final String? rideId;
+  final String? requestId;
 
   RideBookingState({
     this.status = RideBookingStatus.idle,
     this.selectedRide,
     this.rideId,
+    this.requestId,
   });
 
   RideBookingState copyWith({
     RideBookingStatus? status,
     RideOption? selectedRide,
     String? rideId,
+    String? requestId,
   }) {
     return RideBookingState(
       status: status ?? this.status,
       selectedRide: selectedRide ?? this.selectedRide,
       rideId: rideId ?? this.rideId,
+      requestId: requestId ?? this.requestId,
     );
   }
 }
@@ -30,16 +34,20 @@ class RideBookingState {
 class RideBookingNotifier extends StateNotifier<RideBookingState> {
   RideBookingNotifier() : super(RideBookingState());
 
-  void startRequesting(RideOption ride) {
+  void startRequesting(RideOption ride, {String? requestId}) {
     state = state.copyWith(
       status: RideBookingStatus.requesting,
       selectedRide: ride,
       rideId: ride.rideId,
+      requestId: requestId,
     );
   }
 
-  void setPending() {
-    state = state.copyWith(status: RideBookingStatus.pending);
+  void setPending({String? requestId}) {
+    state = state.copyWith(
+      status: RideBookingStatus.pending,
+      requestId: requestId ?? state.requestId,
+    );
   }
 
   void confirmRide(String rideId) {

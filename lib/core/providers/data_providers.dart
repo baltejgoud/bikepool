@@ -74,6 +74,13 @@ final rideRequestsProvider = StreamProvider.family<List<RideRequestModel>, Strin
   return repository.streamRideRequestsForRide(rideId);
 });
 
+final singleRideRequestProvider = StreamProvider.family<RideRequestModel?, String>((ref, requestId) {
+  if (requestId.isEmpty) return Stream.value(null);
+  
+  final repository = ref.watch(rideRepositoryProvider);
+  return repository.streamRideRequest(requestId);
+});
+
 final myRidesAsRiderProvider = StreamProvider<List<RideModel>>((ref) {
   final authState = ref.watch(authStateProvider);
   final user = authState.value;
@@ -82,21 +89,22 @@ final myRidesAsRiderProvider = StreamProvider<List<RideModel>>((ref) {
   return ref.watch(rideRepositoryProvider).getMyRidesAsRider(user.uid);
 });
 final matchedRidesProvider =
-    StreamProvider.family<List<RideModel>, Map<String, double>>(
-        (ref, coordinates) {
+    StreamProvider.family<List<RideModel>, Map<String, dynamic>>(
+        (ref, parameters) {
   final origin = LatLngPoint(
-    lat: coordinates['originLat'] ?? 0.0,
-    lng: coordinates['originLng'] ?? 0.0,
+    lat: (parameters['originLat'] as num?)?.toDouble() ?? 0.0,
+    lng: (parameters['originLng'] as num?)?.toDouble() ?? 0.0,
   );
 
   final destination = LatLngPoint(
-    lat: coordinates['destinationLat'] ?? 0.0,
-    lng: coordinates['destinationLng'] ?? 0.0,
+    lat: (parameters['destinationLat'] as num?)?.toDouble() ?? 0.0,
+    lng: (parameters['destinationLng'] as num?)?.toDouble() ?? 0.0,
   );
 
   return ref.watch(rideRepositoryProvider).getMatchedRides(
         riderOrigin: origin,
         riderDestination: destination,
+        preferences: parameters['preferences'] as List<String>?,
       );
 });
 

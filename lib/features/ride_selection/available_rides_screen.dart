@@ -24,6 +24,7 @@ class AvailableRidesScreen extends ConsumerStatefulWidget {
   final double? originLat;
   final double? originLng;
   final String? initialVehicleType;
+  final List<String>? preferences;
 
   const AvailableRidesScreen({
     super.key,
@@ -33,6 +34,7 @@ class AvailableRidesScreen extends ConsumerStatefulWidget {
     this.originLat,
     this.originLng,
     this.initialVehicleType,
+    this.preferences,
   });
 
   @override
@@ -44,10 +46,10 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
   String? _selectedFilter;
   RideSortOption _selectedSort = RideSortOption.bestMatch;
 
-  /// Stable key for [matchedRidesProvider]. Must be created once and reused
-  /// because Dart Maps use identity equality — a fresh literal on every
-  /// build() would make Riverpod restart the provider in an infinite loop.
-  late final Map<String, double> _rideParams;
+  /// Key for [matchedRidesProvider]. Reassigned when preferences change
+  /// to trigger Riverpod provider refresh.
+  late Map<String, dynamic> _rideParams;
+  late List<String> _selectedPreferences;
 
   final List<String> _filters = [
     'All',
@@ -61,17 +63,108 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
   void initState() {
     super.initState();
     _selectedFilter = widget.initialVehicleType ?? 'All';
+    _selectedPreferences = widget.preferences ?? [];
+    _updateRideParams();
+  }
+
+  void _updateRideParams() {
     _rideParams = {
       'originLat': widget.originLat ?? 17.3850,
       'originLng': widget.originLng ?? 78.4867,
       'destinationLat': widget.destinationLat,
       'destinationLng': widget.destinationLng,
+      'preferences': List<String>.from(_selectedPreferences),
     };
+  }
+
+  void _showPreferencesModal() {
+    final availablePreferences = ['Music', 'AC', 'Women-only', 'Chat', 'Silent'];
+    // Keep local state for the bottom sheet
+    List<String> tempPreferences = List.from(_selectedPreferences);
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+
+            return Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ride Preferences',
+                    style: GoogleFonts.outfit(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.sm,
+                    children: availablePreferences.map((pref) {
+                      final isSelected = tempPreferences.contains(pref);
+                      return FilterChip(
+                        label: Text(pref),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setModalState(() {
+                            if (selected) {
+                              tempPreferences.add(pref);
+                            } else {
+                              tempPreferences.remove(pref);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _selectedPreferences = tempPreferences;
+                          _updateRideParams();
+                        });
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadii.lg),
+                        ),
+                      ),
+                      child: Text(
+                        'Apply Filters',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   RideOption _mapRideToOption(RideModel ride) {
     return RideOption(
       rideId: ride.id,
+      driverUid: ride.driverUid,
       type: ride.vehicleType,
       name: ride.vehicleType == VehicleType.bike ? 'Bike' : 'Car',
       seats: ride.availableSeats,
@@ -517,7 +610,35 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          children: _filters.map((filter) {
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.xs),
+              child: ActionChip(
+                avatar: Icon(
+                  Icons.tune_rounded,
+                  size: 16,
+                  color: _selectedPreferences.isNotEmpty ? AppColors.primary : null,
+                ),
+                label: Text(
+                  _selectedPreferences.isEmpty
+                      ? 'Preferences'
+                      : '${_selectedPreferences.length} Prefs',
+                ),
+                onPressed: _showPreferencesModal,
+                backgroundColor: _selectedPreferences.isNotEmpty
+                    ? AppColors.primary.withValues(alpha: 0.1)
+                    : null,
+                side: BorderSide(
+                  color: _selectedPreferences.isNotEmpty
+                      ? AppColors.primary
+                      : AppColors.outline(
+                          isDark: isDark,
+                          highContrast: highContrast,
+                        ),
+                ),
+              ),
+            ),
+            ..._filters.map((filter) {
             final isSelected = _selectedFilter == filter;
             return Padding(
               padding: const EdgeInsets.only(right: AppSpacing.xs),
@@ -549,7 +670,8 @@ class _AvailableRidesScreenState extends ConsumerState<AvailableRidesScreen> {
                 ),
               ),
             );
-          }).toList(),
+          }),
+          ],
         ),
       ),
     );

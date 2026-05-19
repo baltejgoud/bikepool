@@ -34,7 +34,7 @@ class GoogleMapsService {
 
   /// Search for place predictions using the Places Autocomplete API.
   /// [sessionToken] groups autocomplete + detail requests for billing.
-  /// Biased to India with no hard country restriction so it works pan-India.
+  /// Restricted to India via components: 'country:in'.
   Future<List<PlacePrediction>> searchPlaces(
     String query, {
     String? sessionToken,
@@ -137,6 +137,7 @@ class GoogleMapsService {
   Future<RouteResult?> getDirections({
     required LatLngPoint origin,
     required LatLngPoint destination,
+    List<LatLngPoint>? waypoints,
     String mode = 'driving',
   }) async {
     try {
@@ -145,6 +146,8 @@ class GoogleMapsService {
         queryParameters: {
           'origin': '${origin.lat},${origin.lng}',
           'destination': '${destination.lat},${destination.lng}',
+          if (waypoints != null && waypoints.isNotEmpty)
+            'waypoints': waypoints.map((w) => '${w.lat},${w.lng}').join('|'),
           'mode': mode,
           'key': _apiKey,
           'region': 'in',

@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/auth/auth_repository.dart';
 import '../profile/providers/profile_setup_provider.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -195,8 +195,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                                         ref.read(authRepositoryProvider);
                                     await auth.verifyPhone(
                                       phoneNumber: '+91$phone',
-                                      disableAppVerificationForTesting:
-                                          kDebugMode && kIsWeb,
                                       verificationCompleted:
                                           (PhoneAuthCredential
                                               credential) async {
@@ -319,23 +317,17 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                                     }
 
                                     if (_verificationId != null) {
-                                      final userCred = await auth.signInWithOTP(
+                                      await auth.signInWithOTP(
                                         verificationId: _verificationId!,
                                         smsCode: code,
                                       );
-                                      if (userCred != null && context.mounted) {
+                                      // signInWithOTP now throws on failure,
+                                      // so if we reach here it succeeded.
+                                      if (context.mounted) {
                                         ref
                                             .read(profileSetupProvider.notifier)
                                             .updatePhoneNumber(phone);
                                         context.goNamed('home');
-                                      } else if (context.mounted) {
-                                        setState(() => _isLoading = false);
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                              content: Text(
-                                                  'Invalid OTP. Please try again.')),
-                                        );
                                       }
                                     } else {
                                       setState(() => _isLoading = false);
@@ -344,6 +336,15 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                                         const SnackBar(
                                             content: Text(
                                                 'Verification ID missing. Please resend OTP.')),
+                                      );
+                                    }
+                                  } on AuthException catch (e) {
+                                    // Show user-friendly error from AuthException
+                                    if (context.mounted) {
+                                      setState(() => _isLoading = false);
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(content: Text(e.message)),
                                       );
                                     }
                                   } catch (e) {

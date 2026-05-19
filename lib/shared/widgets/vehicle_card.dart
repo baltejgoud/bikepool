@@ -8,6 +8,7 @@ enum VehicleType { bike, car }
 
 class RideOption {
   final String? rideId;
+  final String? driverUid;
   final VehicleType type;
   final String name;
   final int seats;
@@ -29,6 +30,7 @@ class RideOption {
 
   const RideOption({
     this.rideId,
+    this.driverUid,
     required this.type,
     required this.name,
     required this.seats,

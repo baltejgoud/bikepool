@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:developer' as dev;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/lat_lng_point.dart';
@@ -19,22 +19,28 @@ class RideRepository {
   Future<String> createRide(RideModel ride) async {
     try {
       final payload = ride.toFirestore();
-      print('--- [RideRepository.createRide] Sending to Firestore ---');
-      print('Payload keys: ${payload.keys.toList()}');
+      dev.log('Sending ride to Firestore', name: 'RideRepository.createRide');
+      dev.log('Payload keys: ${payload.keys.toList()}',
+          name: 'RideRepository.createRide');
       final docRef = await _firestore.collection('rides').add(payload);
-      print('--- [RideRepository.createRide] Success: ${docRef.id} ---');
+      dev.log('Successfully created ride: ${docRef.id}',
+          name: 'RideRepository.createRide');
       return docRef.id;
     } on FirebaseException catch (e) {
-      print('--- [RideRepository.createRide] FIREBASE ERROR ---');
-      print('Firebase Error Code: ${e.code}');
-      print('Firebase Error Message: ${e.message}');
-      print('Full Error: $e');
+      dev.log(
+        'Firebase error while creating ride',
+        name: 'RideRepository.createRide',
+        error: e,
+      );
       throw Exception(
           'Firebase Error (${e.code}): ${e.message ?? "Unknown error"}');
     } catch (e, stackTrace) {
-      print('--- [RideRepository.createRide] UNKNOWN ERROR ---');
-      print('Error details: $e');
-      print('StackTrace: $stackTrace');
+      dev.log(
+        'Unknown error while creating ride',
+        name: 'RideRepository.createRide',
+        error: e,
+        stackTrace: stackTrace,
+      );
       throw Exception('Failed to post ride: $e');
     }
   }
@@ -91,7 +97,8 @@ class RideRepository {
     // Fallback: if no geo coordinates, use basic query
     Query query = _firestore
         .collection('rides')
-        .where('status', isEqualTo: RideStatus.active.name);
+        .where('status', isEqualTo: RideStatus.active.name)
+        .limit(50);
 
     return query.snapshots().map((snapshot) {
       return snapshot.docs.map((doc) => RideModel.fromFirestore(doc)).toList();
@@ -154,10 +161,39 @@ class RideRepository {
 
   // --- Ride Requests ---
 
+  /// Creates a ride request inside a Firestore transaction so that the seat-
+  /// availability check and the request creation happen atomically.  This
+  /// prevents two concurrent riders from both seeing `availableSeats > 0` and
+  /// creating requests that would overbook the ride.
   Future<String> requestRide(RideRequestModel request) async {
-    final docRef =
-        await _firestore.collection('ride_requests').add(request.toFirestore());
-    return docRef.id;
+    final requestRef = _firestore.collection('ride_requests').doc();
+
+    await _firestore.runTransaction((transaction) async {
+      final rideDoc = await transaction.get(
+        _firestore.collection('rides').doc(request.rideId),
+      );
+
+      if (!rideDoc.exists) {
+        throw Exception('Ride not found.');
+      }
+
+      final ride = RideModel.fromFirestore(rideDoc);
+      if (ride.availableSeats <= 0) {
+        throw Exception('No seats available for this ride.');
+      }
+
+      transaction.set(requestRef, request.toFirestore());
+    });
+
+    return requestRef.id;
+  }
+
+  Stream<RideRequestModel?> streamRideRequest(String requestId) {
+    return _firestore
+        .collection('ride_requests')
+        .doc(requestId)
+        .snapshots()
+        .map((doc) => doc.exists ? RideRequestModel.fromFirestore(doc) : null);
   }
 
   Stream<List<RideRequestModel>> streamRideRequestsForRide(String rideId) {
@@ -179,69 +215,85 @@ class RideRepository {
     });
   }
 
-  /// Geohash-optimized ride matching: pre-filter by geohash,
-  /// then run precise route-matching geometry.
-  ///
-  /// Falls back to returning all nearby rides if the Directions API call
-  /// fails or times out, so the stream always emits rather than hanging.
   Stream<List<RideModel>> getMatchedRides({
     required LatLngPoint riderOrigin,
     required LatLngPoint riderDestination,
-    double maxOffRouteMeters = 500,
-    double requiredOverlapFraction = 0.35,
+    int maxDetourSeconds = 900, // 15 mins
+    int maxDetourMeters = 5000, // 5 km
     double searchRadiusKm = 15.0,
+    List<String>? preferences,
   }) {
     return getNearbyRides(
       lat: riderOrigin.lat,
       lng: riderOrigin.lng,
       radiusKm: searchRadiusKm,
     ).asyncMap((nearbyRides) async {
-      // If there are no nearby rides at all, return early
       if (nearbyRides.isEmpty) return <RideModel>[];
 
-      try {
-        final riderRouteResult = await _mapsService
-            .getDirections(
-              origin: riderOrigin,
-              destination: riderDestination,
-            )
-            .timeout(const Duration(seconds: 8));
+      final matchedRides = <RideModel>[];
 
-        // If directions API failed or returned insufficient data,
-        // fall back to showing all nearby rides
-        if (riderRouteResult == null ||
-            riderRouteResult.polylinePoints.length < 2) {
-          return nearbyRides;
-        }
-
-        final riderRoute = riderRouteResult.polylinePoints;
-        final matchedRides = <RideModel>[];
-
-        for (final ride in nearbyRides) {
-          try {
-            if (await _doesRouteMatchRequest(
-              ride,
-              riderOrigin,
-              riderDestination,
-              riderRoute,
-              maxOffRouteMeters,
-              requiredOverlapFraction,
-            )) {
-              matchedRides.add(ride);
+      for (final ride in nearbyRides) {
+        if (preferences != null && preferences.isNotEmpty) {
+          final ridePrefs = ride.preferences;
+          bool hasAllPrefs = true;
+          for (final pref in preferences) {
+            if (!ridePrefs.contains(pref)) {
+              hasAllPrefs = false;
+              break;
             }
-          } catch (_) {
-            // If matching fails for a specific ride, include it anyway
-            matchedRides.add(ride);
+          }
+          if (!hasAllPrefs) {
+            continue; // Skip this ride if it doesn't match preferences
           }
         }
 
-        // If strict matching yields nothing, fall back to all nearby
-        return matchedRides.isEmpty ? nearbyRides : matchedRides;
-      } catch (_) {
-        // Directions API timed out or threw — return all nearby rides
-        // so the user sees something rather than an empty/hanging screen
-        return nearbyRides;
+        try {
+          final originalDuration = ride.durationSeconds ?? 0;
+          final originalDistance = ride.distanceMeters ?? 0;
+
+          // Fallback for legacy rides missing duration/distance
+          if (originalDuration == 0) {
+            matchedRides.add(ride);
+            continue;
+          }
+
+          final driverOrigin =
+              LatLngPoint(lat: ride.originLat, lng: ride.originLng);
+          final driverDestination =
+              LatLngPoint(lat: ride.destinationLat, lng: ride.destinationLng);
+
+          final detourRoute = await _mapsService.getDirections(
+            origin: driverOrigin,
+            destination: driverDestination,
+            waypoints: [riderOrigin, riderDestination],
+          ).timeout(const Duration(seconds: 8));
+
+          if (detourRoute != null) {
+            final detourSeconds =
+                detourRoute.durationSeconds - originalDuration;
+            final detourMeters = detourRoute.distanceMeters - originalDistance;
+
+            if (detourSeconds <= maxDetourSeconds &&
+                detourMeters <= maxDetourMeters) {
+              matchedRides.add(ride);
+            }
+          } else {
+            // Fallback if API fails
+            matchedRides.add(ride);
+          }
+        } catch (e, st) {
+          dev.log(
+            'Directions API detour check failed for ride ${ride.id}: $e',
+            name: 'RideRepository',
+            error: e,
+            stackTrace: st,
+          );
+          // Fallback on error
+          matchedRides.add(ride);
+        }
       }
+
+      return matchedRides;
     });
   }
 
@@ -252,6 +304,11 @@ class RideRepository {
     required String vehicleType,
     required double demandFactor,
   }) async {
+    if (vehicleType != 'car' && vehicleType != 'bike') {
+      throw ArgumentError('Invalid vehicleType. Must be "car" or "bike".');
+    }
+    final clampedDemand = demandFactor.clamp(1.0, 3.0);
+
     try {
       final matrix = await _mapsService.getDistanceMatrix(
         origin: origin,
@@ -259,20 +316,19 @@ class RideRepository {
       );
 
       if (matrix != null) {
-        final distanceMeters = matrix['distanceMeters'] as int;
+        final distanceMeters = (matrix['distanceMeters'] as num).toInt();
         final distanceKm = (distanceMeters / 1000).clamp(1.0, double.infinity);
 
         final baseRate = vehicleType == 'car' ? 14.0 : 6.0;
         final fixed = vehicleType == 'car' ? 40.0 : 20.0;
-        final surge = demandFactor > 1 ? demandFactor : 1.0;
 
-        return (fixed + (distanceKm * baseRate)) * surge;
+        return (fixed + (distanceKm * baseRate)) * clampedDemand;
       }
     } catch (e) {
       // Fall back to Haversine calculation
     }
 
-    return _fallbackFare(origin, destination, vehicleType, demandFactor);
+    return _fallbackFare(origin, destination, vehicleType, clampedDemand);
   }
 
   double _fallbackFare(
@@ -281,6 +337,11 @@ class RideRepository {
     String vehicleType,
     double demandFactor,
   ) {
+    if (vehicleType != 'car' && vehicleType != 'bike') {
+      throw ArgumentError('Invalid vehicleType. Must be "car" or "bike".');
+    }
+    final clampedDemand = demandFactor.clamp(1.0, 3.0);
+
     final distanceKm = GeohashService.distanceKm(
       origin.lat,
       origin.lng,
@@ -290,8 +351,8 @@ class RideRepository {
 
     final baseRate = vehicleType == 'car' ? 14.0 : 6.0;
     final fixed = vehicleType == 'car' ? 40.0 : 20.0;
-    final surge = demandFactor > 1 ? demandFactor : 1.0;
-    return (fixed + (distanceKm * baseRate)) * surge;
+
+    return (fixed + (distanceKm * baseRate)) * clampedDemand;
   }
 
   // ─── Private helpers ──────────────────────────────────────────────
@@ -301,8 +362,11 @@ class RideRepository {
     if (streams.isEmpty) return Stream.value([]);
     if (streams.length == 1) return streams.first;
 
-    // Use a StreamController to merge multiple streams
-    final controller = StreamController<List<RideModel>>();
+    // Broadcast controller so multiple listeners (e.g. StreamBuilder rebuilds
+    // during navigation) can subscribe without throwing "Stream already listened
+    // to". onCancel still fires when the last listener unsubscribes, which is
+    // when we cancel the underlying source stream subscriptions.
+    final controller = StreamController<List<RideModel>>.broadcast();
     final latestData = List<List<RideModel>>.filled(streams.length, []);
     final subscriptions = <StreamSubscription>[];
     int activeCount = streams.length;
@@ -331,151 +395,6 @@ class RideRepository {
     return controller.stream;
   }
 
-  Future<bool> _doesRouteMatchRequest(
-    RideModel ride,
-    LatLngPoint riderOrigin,
-    LatLngPoint riderDestination,
-    List<LatLngPoint> riderRoute,
-    double maxOffRouteMeters,
-    double requiredOverlapFraction,
-  ) async {
-    final driverRoute = ride.routePath;
-    if (driverRoute.length < 2) return false;
-
-    final routeLength = _routeLengthMeters(driverRoute);
-    if (routeLength <= 0) return false;
-
-    final originProjection = _projectOntoRoute(riderOrigin, driverRoute);
-    final destinationProjection =
-        _projectOntoRoute(riderDestination, driverRoute);
-
-    if (originProjection == null || destinationProjection == null) {
-      return false;
-    }
-
-    if (originProjection.distance > maxOffRouteMeters ||
-        destinationProjection.distance > maxOffRouteMeters) {
-      return false;
-    }
-
-    if (originProjection.frac > destinationProjection.frac) {
-      return false;
-    }
-
-    final overlapFraction = _routeOverlapFraction(
-      riderRoute,
-      driverRoute,
-      maxOffRouteMeters,
-    );
-
-    return overlapFraction >= requiredOverlapFraction;
-  }
-
-  double _routeOverlapFraction(
-    List<LatLngPoint> candidateRoute,
-    List<LatLngPoint> referenceRoute,
-    double maxOffRouteMeters,
-  ) {
-    final totalLength = _routeLengthMeters(candidateRoute);
-    if (totalLength <= 0) return 0.0;
-
-    double overlapLength = 0.0;
-    for (var i = 0; i < candidateRoute.length - 1; i++) {
-      final start = candidateRoute[i];
-      final end = candidateRoute[i + 1];
-      final segmentLength = _distanceBetweenPoints(start, end);
-
-      final startNear =
-          _distanceToRoute(start, referenceRoute) <= maxOffRouteMeters;
-      final endNear =
-          _distanceToRoute(end, referenceRoute) <= maxOffRouteMeters;
-
-      if (startNear && endNear) {
-        overlapLength += segmentLength;
-      } else if (startNear || endNear) {
-        overlapLength += segmentLength * 0.5;
-      }
-    }
-
-    return overlapLength / totalLength;
-  }
-
-  double _distanceToRoute(LatLngPoint point, List<LatLngPoint> route) {
-    final projection = _projectOntoRoute(point, route);
-    return projection?.distance ?? double.infinity;
-  }
-
-  _Projection? _projectOntoRoute(LatLngPoint point, List<LatLngPoint> route) {
-    _Projection? best;
-    double travelled = 0;
-    final totalLength = _routeLengthMeters(route);
-
-    for (var i = 0; i < route.length - 1; i++) {
-      final s = route[i];
-      final e = route[i + 1];
-      final segLen = _distanceBetweenPoints(s, e);
-
-      final segProjection = _projectToSegment(point, s, e);
-      if (segProjection != null) {
-        final currDist = _distanceBetweenPoints(
-            point, LatLngPoint(lat: segProjection.lat, lng: segProjection.lng));
-        final frac = (travelled + segLen * segProjection.t) / totalLength;
-
-        if (best == null || currDist < best.distance) {
-          best = _Projection(distance: currDist, frac: frac);
-        }
-      }
-
-      travelled += segLen;
-    }
-
-    return best;
-  }
-
-  _SegmentProjection? _projectToSegment(
-      LatLngPoint p, LatLngPoint a, LatLngPoint b) {
-    final ax = _lngToX(a.lng, a.lat);
-    final ay = _latToY(a.lat);
-    final bx = _lngToX(b.lng, b.lat);
-    final by = _latToY(b.lat);
-    final px = _lngToX(p.lng, p.lat);
-    final py = _latToY(p.lat);
-
-    final dx = bx - ax;
-    final dy = by - ay;
-    final mag2 = dx * dx + dy * dy;
-    if (mag2 == 0) return null;
-
-    final t = ((px - ax) * dx + (py - ay) * dy) / mag2;
-    final clamped = t.clamp(0.0, 1.0);
-    final projX = ax + clamped * dx;
-    final projY = ay + clamped * dy;
-    final projLat = _yToLat(projY);
-    final projLng = _xToLng(projX, projLat);
-
-    return _SegmentProjection(lat: projLat, lng: projLng, t: clamped);
-  }
-
-  double _routeLengthMeters(List<LatLngPoint> route) {
-    double length = 0;
-    for (var i = 0; i < route.length - 1; i++) {
-      length += _distanceBetweenPoints(route[i], route[i + 1]);
-    }
-    return length;
-  }
-
-  double _distanceBetweenPoints(LatLngPoint a, LatLngPoint b) {
-    return GeohashService.distanceKm(a.lat, a.lng, b.lat, b.lng) * 1000;
-  }
-
-  double _degreesToRadians(double degrees) => degrees * (pi / 180);
-  double _latToY(double lat) => _degreesToRadians(lat);
-  double _lngToX(double lng, double lat) =>
-      _degreesToRadians(lng) * cos(_degreesToRadians(lat));
-  double _yToLat(double y) => y * (180 / pi);
-  double _xToLng(double x, double lat) =>
-      x * (180 / pi) / cos(_degreesToRadians(lat));
-
   /// Update ride status in Firestore
   Future<void> updateRideStatus(String rideId, RideStatus status) async {
     await _firestore.collection('rides').doc(rideId).update({
@@ -483,52 +402,24 @@ class RideRepository {
     });
   }
 
-  /// Accept a rider request and update the ride in Firestore
-  Future<bool> acceptRider(String rideId, String riderUid) async {
-    final rideRef = _firestore.collection('rides').doc(rideId);
+  /// Accept a rider request and update the ride in Firestore.
+  ///
+  /// Delegates to [bookSeat] — the transaction logic lives in one place so
+  /// any future additions (notifications, audit logging, etc.) only need a
+  /// single change.
+  Future<bool> acceptRider(String rideId, String riderUid) =>
+      bookSeat(rideId, riderUid);
 
-    return _firestore.runTransaction((transaction) async {
-      final snapshot = await transaction.get(rideRef);
-      if (!snapshot.exists) return false;
-
-      final ride = RideModel.fromFirestore(snapshot);
-      if (ride.availableSeats <= 0) return false;
-      if (ride.riderUids.contains(riderUid)) return true;
-
-      transaction.update(rideRef, {
-        'availableSeats': FieldValue.increment(-1),
-        'riderUids': FieldValue.arrayUnion([riderUid]),
-      });
-
-      return true;
-    });
-  }
-
-  /// Update driver's current location in the ride document
+  /// Update driver's current location in the dedicated locations document
   Future<void> updateDriverLocation(
     String rideId,
     double lat,
     double lng,
   ) async {
-    await _firestore.collection('rides').doc(rideId).update({
+    await _firestore.collection('locations').doc(rideId).set({
       'currentDriverLat': lat,
       'currentDriverLng': lng,
       'lastLocationUpdate': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
   }
-}
-
-class _Projection {
-  final double distance;
-  final double frac;
-
-  _Projection({required this.distance, required this.frac});
-}
-
-class _SegmentProjection {
-  final double lat;
-  final double lng;
-  final double t;
-
-  _SegmentProjection({required this.lat, required this.lng, required this.t});
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:developer' as dev;
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -64,6 +65,25 @@ class LocationService {
       );
     }
 
+    // iOS only grants LocationPermission.whileInUse via the standard prompt.
+    // The Geolocator stream is silently paused when the app is backgrounded
+    // unless the user has granted LocationPermission.always. Request the
+    // upgrade here; if the user declines we continue but log a warning so
+    // the silent tracking failure is visible in the debug console.
+    if (Platform.isIOS) {
+      final current = await Geolocator.checkPermission();
+      if (current == LocationPermission.whileInUse) {
+        final upgraded = await Geolocator.requestPermission();
+        if (upgraded != LocationPermission.always) {
+          dev.log(
+            'Background location permission not granted (got: $upgraded). '
+            'Driver tracking will stop when the app is backgrounded on iOS.',
+            name: 'LocationService',
+          );
+        }
+      }
+    }
+
     _positionStream = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
@@ -99,26 +119,25 @@ class LocationService {
 
   /// Single consolidated Firestore write per location update.
   ///
-  /// Writes only to the ride document. The previous implementation fanned out
-  /// to three separate collections on every update, which tripled costs and
-  /// write amplification. Consumers should read location data from the ride
-  /// document via [getDriverLocation].
+  /// Writes to a dedicated 'locations' collection to separate high-frequency 
+  /// GPS updates from the slower-moving 'rides' document.
   Future<void> _updateDriverLocation(
     String rideId,
     String driverUid,
     Position position,
   ) async {
-    await _firestore.collection('rides').doc(rideId).update({
+    await _firestore.collection('locations').doc(rideId).set({
+      'driverUid': driverUid,
       'currentDriverLat': position.latitude,
       'currentDriverLng': position.longitude,
       'lastLocationUpdate': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
   }
 
-  /// Stream the driver's current location from the ride document.
+  /// Stream the driver's current location from the dedicated locations document.
   Stream<LatLngPoint?> getDriverLocation(String rideId) {
     return _firestore
-        .collection('rides')
+        .collection('locations')
         .doc(rideId)
         .snapshots()
         .map((doc) {
@@ -131,22 +150,4 @@ class LocationService {
     });
   }
 
-  /// Get the driver's location history for a ride over the last 24 hours.
-  Stream<List<LatLngPoint>> getDriverLocationHistory(String rideId) {
-    final yesterday = DateTime.now().subtract(const Duration(days: 1));
-
-    return _firestore
-        .collection('driverLocations')
-        .where('rideId', isEqualTo: rideId)
-        .where('timestamp', isGreaterThan: yesterday)
-        .orderBy('timestamp', descending: true)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) {
-              final data = doc.data();
-              return LatLngPoint(
-                lat: (data['latitude'] as num?)?.toDouble() ?? 0.0,
-                lng: (data['longitude'] as num?)?.toDouble() ?? 0.0,
-              );
-            }).toList());
-  }
 }

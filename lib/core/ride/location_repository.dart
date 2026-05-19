@@ -6,10 +6,10 @@ class LocationRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// Stream driver's current location for a specific ride.
-  /// Now reads directly from the ride document's top-level fields for speed and cost-efficiency.
+  /// Reads from the dedicated 'locations' collection to avoid read amplification.
   Stream<LatLngPoint?> getDriverCurrentLocation(String rideId) {
     return _firestore
-        .collection('rides')
+        .collection('locations')
         .doc(rideId)
         .snapshots()
         .map((doc) {
@@ -27,7 +27,7 @@ class LocationRepository {
 
   /// Get driver's last known location for a ride (useful for initial map centering).
   Future<LatLngPoint?> getDriverLastLocation(String rideId) async {
-    final doc = await _firestore.collection('rides').doc(rideId).get();
+    final doc = await _firestore.collection('locations').doc(rideId).get();
 
     if (doc.exists && doc.data() != null) {
       final data = doc.data()!;
@@ -40,14 +40,14 @@ class LocationRepository {
     return null;
   }
 
-  /// Update driver's current location in the ride document.
+  /// Update driver's current location in the dedicated locations document.
   Future<void> updateDriverLocationInRide(
       String rideId, LatLngPoint location) async {
-    await _firestore.collection('rides').doc(rideId).update({
+    await _firestore.collection('locations').doc(rideId).set({
       'currentDriverLat': location.lat,
       'currentDriverLng': location.lng,
       'lastLocationUpdate': FieldValue.serverTimestamp(),
-    });
+    }, SetOptions(merge: true));
   }
 
   /// Stream multiple drivers' locations for riders to see nearby drivers.
@@ -55,9 +55,9 @@ class LocationRepository {
       List<String> rideIds) {
     if (rideIds.isEmpty) return Stream.value({});
 
-    // Observe the entire rides collection for specific ride IDs to get real-time location updates
+    // Observe the dedicated locations collection for real-time updates
     return _firestore
-        .collection('rides')
+        .collection('locations')
         .where(FieldPath.documentId, whereIn: rideIds)
         .snapshots()
         .map((snapshot) {

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/auth/auth_provider.dart';
+import '../../core/providers/data_providers.dart';
 import '../../shared/widgets/app_back_button.dart';
 import '../../shared/widgets/app_pill.dart';
 import 'providers/profile_setup_provider.dart';
@@ -15,7 +16,18 @@ class ProfileScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(profileSetupProvider);
+    // userProfileProvider streams the live Firestore document so the name and
+    // phone shown here are always up-to-date even after an edit.
+    final firestoreUser = ref.watch(userProfileProvider).value;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Prefer the Firestore name (live) and fall back to the in-memory state.
+    final displayName = firestoreUser?.fullName.isNotEmpty == true
+        ? firestoreUser!.fullName
+        : profile.fullName;
+    final displayPhone = firestoreUser?.phoneNumber.isNotEmpty == true
+        ? firestoreUser!.phoneNumber
+        : profile.phoneNumber;
 
     return Scaffold(
       backgroundColor:
@@ -35,7 +47,12 @@ class ProfileScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
         children: [
-          _ProfileHero(profile: profile, isDark: isDark),
+          _ProfileHero(
+            profile: profile,
+            isDark: isDark,
+            displayName: displayName,
+            displayPhone: displayPhone,
+          ),
           const SizedBox(height: 14),
           _ProfileStats(profile: profile, isDark: isDark),
           const SizedBox(height: 28),
@@ -46,9 +63,9 @@ class ProfileScreen extends ConsumerWidget {
             icon: Icons.person_outline_rounded,
             iconColor: const Color(0xFF2563EB),
             title: 'Personal Details',
-            subtitle: profile.fullName.isEmpty
+            subtitle: displayName.isEmpty
                 ? 'Add your name, phone and emergency contact'
-                : '${profile.fullName} - +91 ${profile.phoneNumber}',
+                : '$displayName - +91 $displayPhone',
             trailingLabel: profile.hasPersonalDetails ? 'Complete' : 'Required',
             trailingColor:
                 profile.hasPersonalDetails ? AppColors.primary : Colors.orange,
@@ -137,10 +154,14 @@ class ProfileScreen extends ConsumerWidget {
 class _ProfileHero extends StatelessWidget {
   final ProfileSetupState profile;
   final bool isDark;
+  final String displayName;
+  final String displayPhone;
 
   const _ProfileHero({
     required this.profile,
     required this.isDark,
+    required this.displayName,
+    required this.displayPhone,
   });
 
   @override
@@ -178,18 +199,18 @@ class _ProfileHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  profile.fullName.isEmpty
+                  displayName.isEmpty
                       ? 'Complete your profile'
-                      : profile.fullName,
+                      : displayName,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  profile.phoneNumber.isEmpty
+                  displayPhone.isEmpty
                       ? 'Shared rider and driver account'
-                      : '+91 ${profile.phoneNumber} - Rider & Driver account',
+                      : '+91 $displayPhone - Rider & Driver account',
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     color: isDark ? Colors.white60 : Colors.black54,

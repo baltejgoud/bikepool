@@ -879,6 +879,16 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                     : () async {
                         setState(() => _isLoading = true);
                         try {
+                          final preferences = <String>[];
+                          if (_prefMusic) preferences.add('Music');
+                          if (!_isBike && _prefAC) preferences.add('AC');
+                          if (_prefWomenOnly) preferences.add('Women only');
+                          if (_prefChat) {
+                            preferences.add('Chat allowed');
+                          } else {
+                            preferences.add('Silent ride');
+                          }
+
                           // Update Driver Ride Provider
                           await ref.read(driverRideProvider.notifier).postRide(
                                 from: 'Current Location',
@@ -904,6 +914,7 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                                     _distance != '-' ? _distance : null,
                                 durationText:
                                     _duration != '-' ? _duration : null,
+                                preferences: preferences,
                               );
 
                           if (!context.mounted) return;
@@ -981,8 +992,8 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: isDarkDialog
-                                              ? Colors.blue.withOpacity(0.2)
-                                              : Colors.blue.withOpacity(0.1),
+                                              ? Colors.blue.withValues(alpha: 0.2)
+                                              : Colors.blue.withValues(alpha: 0.1),
                                           borderRadius:
                                               BorderRadius.circular(8),
                                         ),
@@ -1055,8 +1066,8 @@ class _OfferRideScreenState extends ConsumerState<OfferRideScreen> {
                             },
                           );
                         } catch (e) {
-                          print('❌ ERROR in postRide: $e');
-                          print('Error type: ${e.runtimeType}');
+                          debugPrint('❌ ERROR in postRide: $e');
+                          debugPrint('Error type: ${e.runtimeType}');
                           if (context.mounted) {
                             showDialog(
                               context: context,

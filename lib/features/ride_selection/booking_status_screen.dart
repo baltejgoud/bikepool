@@ -8,11 +8,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../core/providers/data_providers.dart';
-import '../../core/auth/auth_provider.dart';
+import '../../core/models/ride_request_model.dart';
 import '../../shared/widgets/app_back_button.dart';
 import 'ride_booking_provider.dart';
-
-enum _BookingPhase { waiting, matched }
 
 class BookingStatusScreen extends ConsumerStatefulWidget {
   const BookingStatusScreen({super.key});
@@ -25,8 +23,10 @@ class BookingStatusScreen extends ConsumerStatefulWidget {
 class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseController;
-  Timer? _simulationTimer;
-  _BookingPhase _phase = _BookingPhase.waiting;
+
+  // Tracks whether we've already reacted to a terminal status to avoid
+  // double-navigation (the stream can emit more than once).
+  bool _handled = false;
 
   @override
   void initState() {
@@ -35,193 +35,246 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
-
-    final bookingState = ref.read(rideBookingProvider);
-    _phase = bookingState.status == RideBookingStatus.confirmed
-        ? _BookingPhase.matched
-        : _BookingPhase.waiting;
-
-    if (bookingState.status != RideBookingStatus.confirmed) {
-      _startSimulation();
-    }
-  }
-
-  void _startSimulation() {
-    _simulationTimer?.cancel();
-
-    _simulationTimer = Timer(const Duration(seconds: 2), () async {
-      if (!mounted) return;
-
-      final bookingState = ref.read(rideBookingProvider);
-      final rideId = bookingState.rideId;
-      final ride = bookingState.selectedRide;
-
-      if (ride == null || rideId == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Booking failed: Invalid ride data')),
-          );
-          context.goNamed('home');
-        }
-        return;
-      }
-
-      // Get current user
-      final authState = ref.read(authStateProvider);
-      final user = authState.value;
-      if (user == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text('Booking failed: User not authenticated')),
-          );
-          context.goNamed('home');
-        }
-        return;
-      }
-
-      // Call the actual bookSeat function
-      final rideRepository = ref.read(rideRepositoryProvider);
-      try {
-        final bookingSuccess = await rideRepository.bookSeat(rideId, user.uid);
-
-        if (!mounted) return;
-
-        if (bookingSuccess) {
-          ref.read(rideBookingProvider.notifier).confirmRide(rideId);
-          setState(() {
-            _phase = _BookingPhase.matched;
-          });
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content:
-                  Text('Booking failed: No available seats or ride not found'),
-            ),
-          );
-          ref.read(rideBookingProvider.notifier).reset();
-          context.goNamed('home');
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Booking error: ${e.toString()}')),
-          );
-          ref.read(rideBookingProvider.notifier).reset();
-          context.goNamed('home');
-        }
-      }
-    });
   }
 
   @override
   void dispose() {
-    _simulationTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
 
-  void _cancelRequest() {
-    _simulationTimer?.cancel();
+  // ─── Actions ───────────────────────────────────────────────────────────────
+
+  Future<void> _cancelRequest() async {
+    final bookingState = ref.read(rideBookingProvider);
+    final requestId = bookingState.requestId;
+
+    if (requestId != null && requestId.isNotEmpty) {
+      try {
+        await ref
+            .read(rideRepositoryProvider)
+            .updateRideRequestStatus(requestId, RideRequestStatus.cancelled);
+      } catch (_) {
+        // Best-effort cancel — we still navigate away
+      }
+    }
+
     ref.read(rideBookingProvider.notifier).reset();
-    context.goNamed('home');
+    if (mounted) context.goNamed('home');
   }
 
   void _openTracking() {
-    final bookingState = ref.read(rideBookingProvider);
-    final rideId = bookingState.rideId;
-
+    final rideId = ref.read(rideBookingProvider).rideId;
     if (rideId == null || rideId.isEmpty) {
       context.goNamed('home');
       return;
     }
-
-    context.goNamed(
-      'tracking',
-      extra: {'rideId': rideId},
-    );
+    context.goNamed('tracking', extra: {'rideId': rideId});
   }
+
+  // ─── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final bookingState = ref.watch(rideBookingProvider);
     final ride = bookingState.selectedRide;
+    final requestId = bookingState.requestId ?? '';
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final highContrast = MediaQuery.of(context).highContrast;
-    final isMatched = bookingState.status == RideBookingStatus.confirmed ||
-        _phase == _BookingPhase.matched;
 
+    // ── Empty-state guard ─────────────────────────────────────────────────
     if (ride == null) {
-      return Scaffold(
-        appBar: AppBar(
-          leading: const AppBackButton(),
-          title: const Text('Ride Status'),
-        ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.route_rounded,
-                  size: 72,
-                  color: AppColors.secondaryText(
-                    isDark: isDark,
-                    highContrast: highContrast,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                Text(
-                  'No active ride request',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Start from the ride selection screen to request a driver.',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.secondaryText(
-                          isDark: isDark,
-                          highContrast: highContrast,
-                        ),
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AppSpacing.xl),
-                SizedBox(
-                  width: 220,
-                  child: ElevatedButton(
-                    onPressed: () => context.goNamed('home'),
-                    child: const Text('Back to Home'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      return _buildEmptyState(context, isDark, highContrast);
     }
 
+    // ── Real-time Firestore listener ──────────────────────────────────────
+    final requestAsync = ref.watch(singleRideRequestProvider(requestId));
+
+    return requestAsync.when(
+      loading: () => _buildScaffold(
+        context: context,
+        isDark: isDark,
+        highContrast: highContrast,
+        ride: ride,
+        child: _buildWaitingState(context, ride, isDark, highContrast),
+      ),
+      error: (e, _) => _buildScaffold(
+        context: context,
+        isDark: isDark,
+        highContrast: highContrast,
+        ride: ride,
+        child: _buildErrorState(context, e.toString(), isDark, highContrast),
+      ),
+      data: (request) {
+        // React to terminal states exactly once
+        if (!_handled && request != null) {
+          if (request.status == RideRequestStatus.accepted) {
+            _handled = true;
+            ref
+                .read(rideBookingProvider.notifier)
+                .confirmRide(request.rideId);
+          } else if (request.status == RideRequestStatus.declined ||
+              request.status == RideRequestStatus.cancelled) {
+            _handled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    request.status == RideRequestStatus.declined
+                        ? 'Driver declined your request. Try another ride.'
+                        : 'Your request was cancelled.',
+                  ),
+                ),
+              );
+              ref.read(rideBookingProvider.notifier).reset();
+              context.goNamed('home');
+            });
+          }
+        }
+
+        final isAccepted = request?.status == RideRequestStatus.accepted ||
+            bookingState.status == RideBookingStatus.confirmed;
+
+        return _buildScaffold(
+          context: context,
+          isDark: isDark,
+          highContrast: highContrast,
+          ride: ride,
+          isMatched: isAccepted,
+          child: AnimatedSwitcher(
+            duration: AppMotion.slow,
+            switchInCurve: AppMotion.emphasized,
+            switchOutCurve: AppMotion.standard,
+            child: isAccepted
+                ? _buildMatchedState(
+                    context, ride, request, isDark, highContrast)
+                : _buildWaitingState(context, ride, isDark, highContrast),
+          ),
+        );
+      },
+    );
+  }
+
+  // ─── Scaffold wrapper ───────────────────────────────────────────────────
+
+  Widget _buildScaffold({
+    required BuildContext context,
+    required bool isDark,
+    required bool highContrast,
+    required dynamic ride,
+    Widget? child,
+    bool isMatched = false,
+  }) {
     return Scaffold(
       appBar: AppBar(
         leading: const AppBackButton(),
-        title: Text(
-          isMatched ? 'Driver Found' : 'Finding Your Ride',
-        ),
+        title: Text(isMatched ? 'Driver Found' : 'Finding Your Ride'),
       ),
-      body: SafeArea(
-        child: AnimatedSwitcher(
-          duration: AppMotion.slow,
-          switchInCurve: AppMotion.emphasized,
-          switchOutCurve: AppMotion.standard,
-          child: !isMatched
-              ? _buildWaitingState(context, ride, isDark, highContrast)
-              : _buildMatchedState(context, ride, isDark, highContrast),
+      body: SafeArea(child: child ?? const SizedBox.shrink()),
+    );
+  }
+
+  // ─── Empty state ────────────────────────────────────────────────────────
+
+  Widget _buildEmptyState(
+      BuildContext context, bool isDark, bool highContrast) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: const AppBackButton(),
+        title: const Text('Ride Status'),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.route_rounded,
+                size: 72,
+                color: AppColors.secondaryText(
+                  isDark: isDark,
+                  highContrast: highContrast,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                'No active ride request',
+                style: Theme.of(context).textTheme.headlineMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'Start from the ride selection screen to request a driver.',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: AppColors.secondaryText(
+                        isDark: isDark,
+                        highContrast: highContrast,
+                      ),
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              SizedBox(
+                width: 220,
+                child: ElevatedButton(
+                  onPressed: () => context.goNamed('home'),
+                  child: const Text('Back to Home'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
+
+  // ─── Error state ────────────────────────────────────────────────────────
+
+  Widget _buildErrorState(
+    BuildContext context,
+    String error,
+    bool isDark,
+    bool highContrast,
+  ) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi_off_rounded,
+              size: 64,
+              color: AppColors.secondaryText(isDark: isDark, highContrast: highContrast),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              'Connection issue',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Unable to track your request right now. Please check your connection.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.secondaryText(
+                        isDark: isDark, highContrast: highContrast),
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            OutlinedButton(
+              onPressed: _cancelRequest,
+              child: const Text('Go Back'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Waiting state ───────────────────────────────────────────────────────
 
   Widget _buildWaitingState(
     BuildContext context,
@@ -233,7 +286,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
       container: true,
       liveRegion: true,
       label: 'Ride request in progress',
-      value: 'Searching for a nearby driver',
+      value: 'Waiting for driver to accept',
       child: SingleChildScrollView(
         key: const ValueKey('waiting'),
         padding: const EdgeInsets.fromLTRB(
@@ -270,16 +323,16 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
             ),
             const SizedBox(height: AppSpacing.xl),
             Text(
-              'Looking for the best nearby driver',
+              'Waiting for driver to accept',
               style: GoogleFonts.outfit(
-                fontSize: 30,
+                fontSize: 28,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -0.6,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Your ${ride.name.toLowerCase()} request is live. We are checking nearby drivers and confirming the quickest pickup option.',
+              'Your ${ride.name.toLowerCase()} request has been sent. The driver will accept or decline shortly.',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: AppColors.secondaryText(
                       isDark: isDark,
@@ -291,16 +344,16 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
             const SizedBox(height: AppSpacing.xl),
             _StatusCard(
               title: 'Request sent',
-              subtitle: '${ride.priceFormatted} total - ${ride.eta}',
+              subtitle: '${ride.priceFormatted} total · ${ride.eta}',
               icon: Icons.check_circle_rounded,
               isDark: isDark,
               highContrast: highContrast,
             ),
             const SizedBox(height: AppSpacing.md),
             _StatusCard(
-              title: 'Matching nearby drivers',
-              subtitle: 'Usually takes a few seconds',
-              icon: Icons.radar_rounded,
+              title: 'Awaiting driver response',
+              subtitle: 'The driver is reviewing your request',
+              icon: Icons.hourglass_top_rounded,
               isDark: isDark,
               highContrast: highContrast,
               highlighted: true,
@@ -309,7 +362,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
             _StatusCard(
               title: 'Next up',
               subtitle:
-                  'You will move straight to live tracking once a driver accepts',
+                  'You will move straight to live tracking once the driver accepts',
               icon: Icons.route_rounded,
               isDark: isDark,
               highContrast: highContrast,
@@ -328,16 +381,19 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
     );
   }
 
+  // ─── Matched / accepted state ────────────────────────────────────────────
+
   Widget _buildMatchedState(
     BuildContext context,
     dynamic ride,
+    RideRequestModel? request,
     bool isDark,
     bool highContrast,
   ) {
     return Semantics(
       container: true,
       liveRegion: true,
-      label: 'Driver matched',
+      label: 'Driver accepted',
       value: '${ride.driverName} is on the way',
       child: SingleChildScrollView(
         key: const ValueKey('matched'),
@@ -367,7 +423,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
             ),
             const SizedBox(height: AppSpacing.xl),
             Text(
-              'Your driver is on the way',
+              'Your driver is on the way!',
               style: GoogleFonts.outfit(
                 fontSize: 30,
                 fontWeight: FontWeight.w800,
@@ -376,7 +432,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              '${ride.driverName} accepted your request. You can now track the driver live and follow the pickup guidance.',
+              '${ride.driverName} accepted your request. Track the driver live below.',
               style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: AppColors.secondaryText(
                       isDark: isDark,
@@ -386,6 +442,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
                   ),
             ),
             const SizedBox(height: AppSpacing.xl),
+            // Driver card
             Container(
               padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
@@ -442,6 +499,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
                           ],
                         ),
                       ),
+                      // Live badge
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.sm,
@@ -451,13 +509,27 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
                           color: AppColors.accent.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(AppRadii.pill),
                         ),
-                        child: Text(
-                          '3 min away',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.accent,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(
+                                color: AppColors.accent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Live',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.accent,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -479,13 +551,41 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
                       Expanded(
                         child: _InfoTile(
                           label: 'Fare',
-                          value: ride.priceFormatted,
+                          value: request != null
+                              ? '₹${request.price.toStringAsFixed(0)}'
+                              : ride.priceFormatted,
                           isDark: isDark,
                           highContrast: highContrast,
                         ),
                       ),
                     ],
                   ),
+                  if (request != null && request.estimatedTime.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _InfoTile(
+                            label: 'ETA',
+                            value: request.estimatedTime,
+                            isDark: isDark,
+                            highContrast: highContrast,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: _InfoTile(
+                            label: 'Pickup Point',
+                            value: request.pickupLocation.isNotEmpty
+                                ? request.pickupLocation
+                                : ride.origin,
+                            isDark: isDark,
+                            highContrast: highContrast,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -494,7 +594,7 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _openTracking,
-                child: const Text('Track Driver'),
+                child: const Text('Track Driver Live'),
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -511,6 +611,8 @@ class _BookingStatusScreenState extends ConsumerState<BookingStatusScreen>
     );
   }
 }
+
+// ─── Reusable widgets ──────────────────────────────────────────────────────────
 
 class _StatusCard extends StatelessWidget {
   final String title;

@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/auth/auth_provider.dart';
+import '../../core/providers/data_providers.dart';
 import '../../core/theme/app_colors.dart';
 import '../../shared/widgets/app_back_button.dart';
 import 'providers/profile_setup_provider.dart';
@@ -64,19 +66,37 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
 
     setState(() => _isSaving = true);
 
+    final fullName = _fullNameController.text.trim();
+    final emergencyContact = _emergencyController.text.trim();
+    final homeHub = _homeHubController.text.trim();
+
+    // 1. Update the in-memory provider so all screens reflect the change
+    //    immediately without waiting for Firestore.
     ref.read(profileSetupProvider.notifier).savePersonalDetails(
-          fullName: _fullNameController.text.trim(),
-          emergencyContact: _emergencyController.text.trim(),
-          homeHub: _homeHubController.text.trim(),
-        );
+      fullName: fullName,
+      emergencyContact: emergencyContact,
+      homeHub: homeHub,
+    );
 
-    final success =
-        await ref.read(profileSetupProvider.notifier).markProfileCompleted();
+    // 2. Persist only the personal detail fields to Firestore using a targeted
+    //    merge-update. This does NOT require verification to be complete, unlike
+    //    markProfileCompleted() which guards on state.isComplete.
+    try {
+      final authUser = ref.read(authStateProvider).value;
+      if (authUser == null) throw Exception('User not authenticated');
 
-    if (!mounted) return;
-    setState(() => _isSaving = false);
+      await ref.read(userRepositoryProvider).updateUserProfileFields(
+        authUser.uid,
+        {
+          'fullName': fullName,
+          'emergencyContact': emergencyContact,
+          'homeHub': homeHub,
+        },
+      );
 
-    if (success) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Personal details updated successfully!'),
@@ -85,10 +105,13 @@ class _PersonalDetailsScreenState extends ConsumerState<PersonalDetailsScreen> {
         ),
       );
       context.pop();
-    } else {
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to save changes. Please try again.'),
+        SnackBar(
+          content: Text('Failed to save changes: $e'),
           behavior: SnackBarBehavior.floating,
           backgroundColor: Colors.redAccent,
         ),
